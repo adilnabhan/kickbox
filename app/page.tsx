@@ -1,3 +1,5 @@
+import { SupabaseStatus } from "@/components/SupabaseStatus";
+
 const fighters = [
   { name: "Ayan Khan", category: "Youth / 55-60 KG", status: "Approved", seed: 1 },
   { name: "Mira Joseph", category: "Adult / 50-55 KG", status: "Pending", seed: 4 },
@@ -56,6 +58,8 @@ export default function Home() {
             <button className="dark" type="button">Generate Brackets</button>
           </div>
         </header>
+
+        <SupabaseStatus />
 
         <section className="stats" id="dashboard" aria-label="Championship statistics">
           <article>
@@ -177,4 +181,3 @@ export default function Home() {
     </main>
   );
 }
-

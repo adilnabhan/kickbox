@@ -178,6 +178,42 @@ button.dark {
   gap: 16px;
 }
 
+.connection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.connection span {
+  font-weight: 800;
+}
+
+.connection strong {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.connection.ok {
+  border-color: #b9e3cf;
+  background: #effaf4;
+}
+
+.connection.warn {
+  border-color: #f1d591;
+  background: #fff8e6;
+}
+
+.connection.error {
+  border-color: #ebb0a8;
+  background: #fff0ee;
+}
+
 .stats {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 16px;
@@ -379,6 +415,7 @@ button.dark {
 
   .topbar,
   .panelHeader,
+  .connection,
   .flow {
     align-items: stretch;
     flex-direction: column;
@@ -407,4 +444,3 @@ button.dark {
     align-items: flex-start;
   }
 }
-
