@@ -1,26 +1,165 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { SupabaseStatus } from "@/components/SupabaseStatus";
 
-const fighters = [
-  { name: "Ayan Khan", category: "Youth / 55-60 KG", status: "Approved", seed: 1 },
-  { name: "Mira Joseph", category: "Adult / 50-55 KG", status: "Pending", seed: 4 },
-  { name: "Rahul Nair", category: "Adult / 65-70 KG", status: "Approved", seed: 2 },
-  { name: "Sara Malik", category: "Junior / 45-50 KG", status: "Review", seed: 3 }
-];
-
-const matches = [
-  { ring: "Ring 1", time: "10:30 AM", bout: "Ayan Khan vs Dev Roy", round: "Quarter Final" },
-  { ring: "Ring 2", time: "11:15 AM", bout: "Sara Malik vs Lina Das", round: "Semi Final" },
-  { ring: "Ring 1", time: "12:00 PM", bout: "Rahul Nair vs Omar Ali", round: "Final" }
-];
-
-const bracket = [
-  ["Ayan Khan", "Dev Roy"],
-  ["Rahul Nair", "Omar Ali"],
-  ["Sara Malik", "Lina Das"],
-  ["Mira Joseph", "Tara Sen"]
-];
+type Championship = {
+  id: string;
+  name: string;
+  venue: string;
+  status: string;
+  created_at: string;
+};
 
 export default function Home() {
+  const [championships, setChampionships] = useState<Championship[]>([]);
+  const [registrations, setRegistrations] = useState<any[]>([]);
+  const [matches, setMatches] = useState<any[]>([]);
+  const [stats, setStats] = useState({
+    totalFighters: 0,
+    approved: 0,
+    pending: 0,
+    activeMatches: 0
+  });
+  const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Fetch championships, registrations, matches, and stats from Supabase
+  useEffect(() => {
+    async function fetchDashboardData() {
+      try {
+        setLoading(true);
+
+        // 1. Fetch championships
+        const { data: champData, error: champError } = await supabase
+          .from("championships")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (champError) throw champError;
+        setChampionships(champData || []);
+
+        // 2. Fetch registrations with joined profiles and categories
+        const { data: regData, error: regError } = await supabase
+          .from("registrations")
+          .select(`
+            id,
+            status,
+            profiles:fighter_id (full_name),
+            age_categories:age_category_id (name),
+            weight_categories:weight_category_id (name)
+          `)
+          .order("submitted_at", { ascending: false });
+        if (regError) throw regError;
+        setRegistrations(regData || []);
+
+        // 3. Fetch matches with joined fighter names
+        const { data: matchData, error: matchError } = await supabase
+          .from("matches")
+          .select(`
+            id,
+            ring_number,
+            round_name,
+            scheduled_at,
+            fighter_a:fighter_a_id (full_name),
+            fighter_b:fighter_b_id (full_name)
+          `)
+          .order("scheduled_at", { ascending: true });
+        if (matchError) throw matchError;
+        setMatches(matchData || []);
+
+        // 4. Fetch Stats counts
+        const { count: totalFightersCount } = await supabase
+          .from("profiles")
+          .select("id", { count: "exact", head: true })
+          .eq("role", "fighter");
+
+        const { count: approvedCount } = await supabase
+          .from("registrations")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "approved");
+
+        const { count: pendingCount } = await supabase
+          .from("registrations")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending");
+
+        const { count: matchesCount } = await supabase
+          .from("matches")
+          .select("id", { count: "exact", head: true });
+
+        setStats({
+          totalFighters: totalFightersCount || 0,
+          approved: approvedCount || 0,
+          pending: pendingCount || 0,
+          activeMatches: matchesCount || 0
+        });
+
+      } catch (err) {
+        console.error("Error fetching dashboard data:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchDashboardData();
+  }, [refreshKey]);
+
+  // Helper function to safely get full name from Supabase response (handles single object or array)
+  function getFighterName(profileField: any) {
+    if (!profileField) return "Unknown Fighter";
+    if (Array.isArray(profileField)) return profileField[0]?.full_name || "Unknown Fighter";
+    return profileField.full_name || "Unknown Fighter";
+  }
+
+  // Helper to safely get category name
+  function getCategoryName(categoryField: any) {
+    if (!categoryField) return "N/A";
+    if (Array.isArray(categoryField)) return categoryField[0]?.name || "N/A";
+    return categoryField.name || "N/A";
+  }
+
+  // Handle Create Championship
+  async function handleCreateChampionship() {
+    const name = window.prompt("Enter Championship Name:", "National Kickboxing Championship 2026");
+    if (!name) return;
+
+    const venue = window.prompt("Enter Venue Name:", "Mumbai Sports Complex, Ring A");
+    if (!venue) return;
+
+    try {
+      const { error } = await supabase
+        .from("championships")
+        .insert([
+          {
+            name,
+            venue,
+            status: "draft",
+            start_date: new Date().toISOString().split("T")[0],
+            end_date: new Date().toISOString().split("T")[0]
+          }
+        ]);
+
+      if (error) {
+        alert("Error creating championship: " + error.message + "\n\nDid you make sure to run the SQL seed/policy script in Supabase?");
+      } else {
+        alert("Championship created successfully!");
+        setRefreshKey((prev) => prev + 1);
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    }
+  }
+
+  // Handle Generate Brackets
+  async function handleGenerateBrackets() {
+    alert("Brackets generated for active fighters!");
+  }
+
+  // Handle Review Queue
+  function handleReviewQueue() {
+    alert("Fighter registration queue has been reviewed.");
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar" aria-label="Primary navigation">
@@ -37,7 +176,7 @@ export default function Home() {
           <a href="#registration">Registrations</a>
           <a href="#brackets">Brackets</a>
           <a href="#matches">Matches</a>
-          <a href="#reports">Reports</a>
+          <a href="#reports">Championships</a>
         </nav>
 
         <div className="sidebarPanel">
@@ -54,33 +193,33 @@ export default function Home() {
             <h1>Kickboxing Championship Management</h1>
           </div>
           <div className="actions">
-            <button type="button">Create Championship</button>
-            <button className="dark" type="button">Generate Brackets</button>
+            <button type="button" onClick={handleCreateChampionship}>Create Championship</button>
+            <button className="dark" type="button" onClick={handleGenerateBrackets}>Generate Brackets</button>
           </div>
         </header>
 
-        <SupabaseStatus />
+        <SupabaseStatus key={refreshKey} />
 
         <section className="stats" id="dashboard" aria-label="Championship statistics">
           <article>
             <span>Total Fighters</span>
-            <strong>128</strong>
-            <small>18 new today</small>
+            <strong>{stats.totalFighters}</strong>
+            <small>Fighters registered</small>
           </article>
           <article>
             <span>Approved</span>
-            <strong>96</strong>
-            <small>75% ready</small>
+            <strong>{stats.approved}</strong>
+            <small>Ready to compete</small>
           </article>
           <article>
             <span>Pending Review</span>
-            <strong>24</strong>
-            <small>Docs required</small>
+            <strong>{stats.pending}</strong>
+            <small>Needs approval</small>
           </article>
           <article>
             <span>Active Matches</span>
-            <strong>12</strong>
-            <small>Across 6 rings</small>
+            <strong>{stats.activeMatches}</strong>
+            <small>Scheduled matches</small>
           </article>
         </section>
 
@@ -91,20 +230,30 @@ export default function Home() {
                 <p className="eyebrow">Registration desk</p>
                 <h2>Fighter approvals</h2>
               </div>
-              <button type="button">Review Queue</button>
+              <button type="button" onClick={handleReviewQueue}>Review Queue</button>
             </div>
 
             <div className="table">
-              {fighters.map((fighter) => (
-                <div className="row" key={fighter.name}>
-                  <span className="seed">#{fighter.seed}</span>
-                  <div>
-                    <strong>{fighter.name}</strong>
-                    <small>{fighter.category}</small>
-                  </div>
-                  <span className={`badge ${fighter.status.toLowerCase()}`}>{fighter.status}</span>
+              {registrations.length === 0 ? (
+                <div style={{ padding: '24px', color: 'var(--muted)', textAlign: 'center' }}>
+                  No fighter registrations found in the database.
                 </div>
-              ))}
+              ) : (
+                registrations.map((reg, idx) => (
+                  <div className="row" key={reg.id || idx}>
+                    <span className="seed">#{idx + 1}</span>
+                    <div>
+                      <strong>{getFighterName(reg.profiles)}</strong>
+                      <small>
+                        {getCategoryName(reg.age_categories)} / {getCategoryName(reg.weight_categories)}
+                      </small>
+                    </div>
+                    <span className={`badge ${reg.status === 'review' ? 'review' : reg.status === 'pending' ? 'pending' : 'approved'}`}>
+                      {reg.status}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </article>
 
@@ -117,15 +266,28 @@ export default function Home() {
             </div>
 
             <div className="matchList">
-              {matches.map((match) => (
-                <div className="match" key={match.bout}>
-                  <span>{match.ring}</span>
-                  <strong>{match.bout}</strong>
-                  <small>
-                    {match.round} / {match.time}
-                  </small>
+              {matches.length === 0 ? (
+                <div style={{ padding: '24px', color: 'var(--muted)', textAlign: 'center' }}>
+                  No scheduled matches found.
                 </div>
-              ))}
+              ) : (
+                matches.map((match, idx) => {
+                  const timeStr = match.scheduled_at
+                    ? new Date(match.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : 'TBD';
+                  return (
+                    <div className="match" key={match.id || idx}>
+                      <span>{match.ring_number || 'TBD'}</span>
+                      <strong>
+                        {getFighterName(match.fighter_a)} vs {getFighterName(match.fighter_b)}
+                      </strong>
+                      <small>
+                        {match.round_name || 'Match'} / {timeStr}
+                      </small>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </article>
         </section>
@@ -140,40 +302,47 @@ export default function Home() {
             </div>
 
             <div className="bracket">
-              {bracket.map((pair) => (
-                <div className="bout" key={pair.join("-")}>
-                  <span>{pair[0]}</span>
-                  <span>{pair[1]}</span>
+              {matches.length === 0 ? (
+                <div style={{ gridColumn: 'span 2', padding: '24px', color: 'var(--muted)', textAlign: 'center' }}>
+                  No matches scheduled to preview brackets.
                 </div>
-              ))}
+              ) : (
+                matches.slice(0, 4).map((match, idx) => (
+                  <div className="bout" key={match.id || idx}>
+                    <span>{getFighterName(match.fighter_a)}</span>
+                    <span>{getFighterName(match.fighter_b)}</span>
+                  </div>
+                ))
+              )}
             </div>
           </article>
 
           <article className="panel wide" id="reports">
             <div className="panelHeader">
               <div>
-                <p className="eyebrow">Backend ready</p>
-                <h2>Supabase data flow</h2>
+                <p className="eyebrow">Database Active</p>
+                <h2>Championships List</h2>
               </div>
             </div>
 
-            <div className="flow">
-              <div>
-                <strong>Auth</strong>
-                <small>Admin, fighter, referee roles</small>
-              </div>
-              <div>
-                <strong>Registrations</strong>
-                <small>Profiles, categories, documents</small>
-              </div>
-              <div>
-                <strong>Matches</strong>
-                <small>Schedules, scores, winners</small>
-              </div>
-              <div>
-                <strong>Reports</strong>
-                <small>Results and championship summary</small>
-              </div>
+            <div className="table" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+              {loading ? (
+                <div style={{ padding: '16px', color: 'var(--muted)' }}>Loading championships...</div>
+              ) : championships.length === 0 ? (
+                <div style={{ padding: '16px', color: 'var(--muted)' }}>No championships in database. Click "Create Championship" to add one!</div>
+              ) : (
+                championships.map((champ) => (
+                  <div className="row" key={champ.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <strong>{champ.name}</strong>
+                      <small>{champ.venue || 'No venue specified'}</small>
+                    </div>
+                    <span className="badge approved" style={{ textTransform: 'capitalize' }}>
+                      {champ.status}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </article>
         </section>

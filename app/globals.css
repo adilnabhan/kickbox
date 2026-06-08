@@ -22,7 +22,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-outfit), system-ui, -apple-system, sans-serif;
 }
 
 button,
@@ -89,6 +89,7 @@ a {
   text-decoration: none;
   padding: 12px 14px;
   border-radius: 8px;
+  transition: all 0.2s ease;
 }
 
 .navList a.active,
@@ -109,6 +110,11 @@ a {
 .sidebarPanel strong,
 .sidebarPanel small {
   display: block;
+}
+
+.sidebarPanel span,
+.sidebarPanel strong {
+  margin-bottom: 4px;
 }
 
 .workspace {
@@ -136,6 +142,7 @@ a {
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 h1,
@@ -146,10 +153,12 @@ h2 {
 h1 {
   font-size: 34px;
   line-height: 1.12;
+  font-weight: 800;
 }
 
 h2 {
   font-size: 20px;
+  font-weight: 700;
 }
 
 .actions {
@@ -164,12 +173,23 @@ button {
   color: var(--ink);
   background: #fff;
   cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  background: #fcfbf9;
+  border-color: #beb9b1;
 }
 
 button.dark {
   color: #fff;
   border-color: #171717;
   background: #171717;
+}
+
+button.dark:hover {
+  background: #2a2a2a;
 }
 
 .stats,
@@ -224,7 +244,7 @@ button.dark {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  box-shadow: 0 12px 30px rgba(31, 25, 20, 0.06);
+  box-shadow: 0 12px 30px rgba(31, 25, 20, 0.04);
 }
 
 .stats article {
@@ -243,6 +263,7 @@ button.dark {
   display: block;
   margin: 8px 0 4px;
   font-size: 34px;
+  font-weight: 800;
 }
 
 .grid {
@@ -387,14 +408,27 @@ button.dark {
   .sidebar {
     position: static;
     height: auto;
+    padding: 20px;
+    gap: 16px;
   }
 
   .navList {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
   }
 
   .navList a {
+    flex: 0 0 auto;
+    padding: 8px 16px;
     text-align: center;
+  }
+
+  .sidebarPanel {
+    display: none;
   }
 
   .stats {
@@ -408,39 +442,45 @@ button.dark {
 }
 
 @media (max-width: 640px) {
-  .workspace,
-  .sidebar {
-    padding: 18px;
+  .workspace {
+    padding: 20px;
   }
 
-  .topbar,
-  .panelHeader,
-  .connection,
-  .flow {
-    align-items: stretch;
+  .topbar {
     flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
   }
 
   .actions {
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
-  .actions button,
+  .actions button {
+    width: 100%;
+  }
+
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .panelHeader {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
   .panelHeader button {
     width: 100%;
   }
 
-  h1 {
-    font-size: 28px;
-  }
-
-  .stats,
-  .bracket,
-  .navList {
+  .bracket {
     grid-template-columns: 1fr;
   }
 
-  .row {
-    align-items: flex-start;
+  .flow {
+    flex-direction: column;
   }
 }
