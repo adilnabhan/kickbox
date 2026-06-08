@@ -177,6 +177,7 @@ export default function Home() {
           <a href="#brackets">Brackets</a>
           <a href="#matches">Matches</a>
           <a href="#reports">Championships</a>
+          <a href="/admin" style={{ borderLeft: "2px solid var(--brand)", paddingLeft: "12px", color: "var(--brand)", fontWeight: "bold" }}>Admin Control ⚙️</a>
         </nav>
 
         <div className="sidebarPanel">
