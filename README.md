@@ -43,6 +43,43 @@ A professional web and mobile-responsive platform for managing kickboxing tourna
 - SMS notifications
 - Progressive Web App support
 
+## Live Website
+
+This repository now includes a Next.js website that can be deployed directly on Vercel.
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` during local development.
+
+## Supabase Backend
+
+Use Supabase for authentication, PostgreSQL data storage, and row-level security.
+
+1. Create a Supabase project.
+2. Open the Supabase SQL editor.
+3. Run [supabase/schema.sql](supabase/schema.sql).
+4. Copy the Supabase project URL and anon key.
+5. Add these environment variables in Vercel:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+```
+
+## Vercel Deployment
+
+1. Import `adilnabhan/kickbox` in Vercel.
+2. Select Framework Preset: `Next.js`.
+3. Keep Build Command as `npm run build`.
+4. Keep Output Directory empty.
+5. Add the Supabase environment variables.
+6. Deploy.
+
+If Vercel previously showed `404: NOT_FOUND`, redeploy after this commit because the earlier repository only contained documents and no website entrypoint.
+
 ## Repository Contents
 
 - [Project overview](docs/PROJECT_OVERVIEW.md)
@@ -50,6 +87,7 @@ A professional web and mobile-responsive platform for managing kickboxing tourna
 - [Database schema draft](docs/DATABASE_SCHEMA.md)
 - [API specification draft](docs/API_SPEC.md)
 - [Development roadmap](docs/ROADMAP.md)
+- [Supabase schema](supabase/schema.sql)
 
 ## Suggested Architecture
 
@@ -75,4 +113,3 @@ storage/
 - Online payment gateway
 - Digital certificates
 - Ranking system
-
