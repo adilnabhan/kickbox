@@ -1,13 +1,13 @@
 :root {
-  --ink: #171717;
-  --muted: #6b7280;
-  --line: #ded9d1;
-  --paper: #fbfaf7;
-  --panel: #ffffff;
-  --brand: #c63d2f;
-  --gold: #d89b2b;
-  --green: #1f8a5b;
-  --blue: #2f6f9f;
+  --ink: #FFFFFF;
+  --muted: #A1A1AA;
+  --line: #2C2C2E;
+  --paper: #121214;
+  --panel: #1C1C1E;
+  --brand: #FF3B30;
+  --gold: #FF9500;
+  --green: #34C759;
+  --blue: #0A84FF;
 }
 
 * {
@@ -171,25 +171,26 @@ button {
   border-radius: 8px;
   padding: 11px 14px;
   color: var(--ink);
-  background: #fff;
+  background: var(--panel);
   cursor: pointer;
   font-weight: 600;
   transition: all 0.2s ease;
 }
 
 button:hover {
-  background: #fcfbf9;
-  border-color: #beb9b1;
+  background: var(--line);
+  border-color: var(--muted);
 }
 
 button.dark {
   color: #fff;
-  border-color: #171717;
-  background: #171717;
+  border-color: var(--brand);
+  background: var(--brand);
 }
 
 button.dark:hover {
-  background: #2a2a2a;
+  background: #ff5545;
+  border-color: #ff5545;
 }
 
 .stats,
@@ -207,7 +208,7 @@ button.dark:hover {
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--panel);
 }
 
 .connection span {
@@ -220,18 +221,18 @@ button.dark:hover {
 }
 
 .connection.ok {
-  border-color: #b9e3cf;
-  background: #effaf4;
+  border-color: #1b4d3e;
+  background: #142d25;
 }
 
 .connection.warn {
-  border-color: #f1d591;
-  background: #fff8e6;
+  border-color: #5d4514;
+  background: #3c2d0f;
 }
 
 .connection.error {
-  border-color: #ebb0a8;
-  background: #fff0ee;
+  border-color: #5c1e17;
+  background: #3b1411;
 }
 
 .stats {
@@ -295,9 +296,9 @@ button.dark:hover {
 .row {
   gap: 14px;
   padding: 12px;
-  border: 1px solid #eee9e2;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fffdf9;
+  background: var(--panel);
 }
 
 .row div {
@@ -334,21 +335,21 @@ button.dark:hover {
 }
 
 .badge.approved {
-  color: #11643f;
-  background: #dff5e9;
+  color: #34C759;
+  background: #142d25;
 }
 
 .badge.pending,
 .badge.review {
-  color: #7a4c00;
-  background: #fff1cf;
+  color: #FF9500;
+  background: #3c2d0f;
 }
 
 .match {
   padding: 14px;
   border-left: 4px solid var(--brand);
   border-radius: 8px;
-  background: #f8f6f1;
+  background: var(--panel);
 }
 
 .match span {
@@ -367,14 +368,14 @@ button.dark:hover {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border: 1px solid #eee9e2;
+  border: 1px solid var(--line);
   border-radius: 8px;
 }
 
 .bout span {
   padding: 10px;
   border-radius: 6px;
-  background: #f8f6f1;
+  background: var(--panel);
   font-weight: 700;
 }
 
@@ -388,7 +389,7 @@ button.dark:hover {
   min-height: 116px;
   padding: 16px;
   border-radius: 8px;
-  background: #f8f6f1;
+  background: var(--panel);
 }
 
 .flow strong,

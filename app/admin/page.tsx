@@ -260,42 +260,116 @@ export default function AdminPage() {
         groups[key].push(reg);
       });
 
-      let matchCounter = 1;
-      const matchesToInsert = [];
+      let globalMatchCounter = 1;
+      const matchesToInsert: any[] = [];
 
-      // Loop through each group to seed initial matches
+      // Loop through each group to seed the tournament tree structure
       for (const key in groups) {
         const groupFighters = groups[key];
-        if (groupFighters.length < 2) continue;
+        const numFighters = groupFighters.length;
+        if (numFighters < 2) continue;
 
-        // Pair them up
-        for (let i = 0; i < groupFighters.length - 1; i += 2) {
-          const fighterA = groupFighters[i];
-          const fighterB = groupFighters[i + 1];
-
-          // Determine round name
-          const roundName =
-            groupFighters.length <= 2
-              ? "Final"
-              : groupFighters.length <= 4
-              ? "Semi Final"
-              : "Quarter Final";
-
-          matchesToInsert.push({
-            championship_id: selectedChampId,
-            match_number: matchCounter++,
-            round_name: roundName,
-            fighter_a_id: fighterA.fighter_id,
-            fighter_b_id: fighterB.fighter_id,
-            ring_number: `Ring ${(matchCounter % 2) + 1}`,
-            status: "scheduled",
-            scheduled_at: new Date(Date.now() + matchCounter * 20 * 60000).toISOString()
-          });
+        // Calculate next power of 2 for tree structure slots
+        let P = 2;
+        while (P < numFighters) {
+          P *= 2;
         }
+
+        const firstRoundSize = P / 2;
+
+        // Pre-generate matches for this group (from first round down to final)
+        const groupMatches: any[] = [];
+        let currentRoundSize = firstRoundSize;
+        while (currentRoundSize >= 1) {
+          let roundName = "Final";
+          if (currentRoundSize === 2) roundName = "Semi Final";
+          else if (currentRoundSize === 4) roundName = "Quarter Final";
+          else if (currentRoundSize === 8) roundName = "Round of 16";
+          else if (currentRoundSize > 8) roundName = `Round of ${currentRoundSize * 2}`;
+
+          for (let m = 0; m < currentRoundSize; m++) {
+            groupMatches.push({
+              championship_id: selectedChampId,
+              match_number: -1, // Assigned sequentially later
+              round_name: roundName,
+              fighter_a_id: null,
+              fighter_b_id: null,
+              winner_id: null,
+              status: "scheduled",
+              ring_number: `Ring ${(globalMatchCounter % 2) + 1}`,
+              scheduled_at: new Date(Date.now() + globalMatchCounter * 20 * 60000).toISOString()
+            });
+          }
+          currentRoundSize = Math.floor(currentRoundSize / 2);
+        }
+
+        // Seed fighters into the first round matches
+        for (let i = 0; i < numFighters; i++) {
+          const matchIndex = Math.floor(i / 2);
+          if (i % 2 === 0) {
+            groupMatches[matchIndex].fighter_a_id = groupFighters[i].fighter_id;
+          } else {
+            groupMatches[matchIndex].fighter_b_id = groupFighters[i].fighter_id;
+          }
+        }
+
+        // Handle byes in the first round (if fighter_a is present but no fighter_b)
+        for (let m = 0; m < firstRoundSize; m++) {
+          if (groupMatches[m].fighter_a_id && !groupMatches[m].fighter_b_id) {
+            groupMatches[m].winner_id = groupMatches[m].fighter_a_id;
+            groupMatches[m].status = "completed";
+          }
+        }
+
+        // Auto-propagate byes into the subsequent rounds
+        for (let idx = 0; idx < groupMatches.length; idx++) {
+          const currentM = groupMatches[idx];
+          if (currentM.status === "completed" && currentM.winner_id) {
+            let nextIndex = -1;
+            let isFighterA = true;
+
+            if (groupMatches.length === 3) {
+              if (idx === 0) { nextIndex = 2; isFighterA = true; }
+              else if (idx === 1) { nextIndex = 2; isFighterA = false; }
+            } else if (groupMatches.length === 7) {
+              if (idx === 0) { nextIndex = 4; isFighterA = true; }
+              else if (idx === 1) { nextIndex = 4; isFighterA = false; }
+              else if (idx === 2) { nextIndex = 5; isFighterA = true; }
+              else if (idx === 3) { nextIndex = 5; isFighterA = false; }
+              else if (idx === 4) { nextIndex = 6; isFighterA = true; }
+              else if (idx === 5) { nextIndex = 6; isFighterA = false; }
+            } else if (groupMatches.length === 15) {
+              if (idx < 8) {
+                nextIndex = 8 + Math.floor(idx / 2);
+                isFighterA = idx % 2 === 0;
+              } else if (idx < 12) {
+                nextIndex = 12 + Math.floor((idx - 8) / 2);
+                isFighterA = (idx - 8) % 2 === 0;
+              } else if (idx < 14) {
+                nextIndex = 14;
+                isFighterA = idx === 12;
+              }
+            }
+
+            if (nextIndex !== -1 && nextIndex < groupMatches.length) {
+              if (isFighterA) {
+                groupMatches[nextIndex].fighter_a_id = currentM.winner_id;
+              } else {
+                groupMatches[nextIndex].fighter_b_id = currentM.winner_id;
+              }
+            }
+          }
+        }
+
+        // Assign global match numbers
+        groupMatches.forEach((m) => {
+          m.match_number = globalMatchCounter++;
+          matchesToInsert.push(m);
+        });
       }
 
       if (matchesToInsert.length === 0) {
-        alert("Not enough fighters in the same age/weight groups to pair them up.");
+        alert("Not enough fighters in the same age/weight groups to seed brackets.");
         return;
       }
 
@@ -318,7 +392,8 @@ export default function AdminPage() {
   async function handleRecordWinner(matchId: string, winnerId: string) {
     if (!winnerId) return;
     try {
-      const { error } = await supabase
+      // 1. Update the current match as completed with the winner
+      const { error: updateError } = await supabase
         .from("matches")
         .update({
           winner_id: winnerId,
@@ -326,8 +401,70 @@ export default function AdminPage() {
         })
         .eq("id", matchId);
 
-      if (error) throw error;
-      alert("Winner recorded!");
+      if (updateError) throw updateError;
+
+      // 2. Fetch current match details to propagate the winner
+      const { data: currentMatch, error: fetchError } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("id", matchId)
+        .single();
+
+      if (fetchError || !currentMatch) throw fetchError || new Error("Match not found");
+
+      // 3. Fetch all sibling matches of the same championship to trace progression
+      const { data: siblingMatches } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("championship_id", currentMatch.championship_id)
+        .order("match_number", { ascending: true });
+
+      if (siblingMatches && siblingMatches.length > 0) {
+        const currentIndex = siblingMatches.findIndex((m) => m.id === matchId);
+        if (currentIndex !== -1) {
+          let nextIndex = -1;
+          let isFighterA = true;
+
+          if (siblingMatches.length === 3) {
+            if (currentIndex === 0) { nextIndex = 2; isFighterA = true; }
+            else if (currentIndex === 1) { nextIndex = 2; isFighterA = false; }
+          } else if (siblingMatches.length === 7) {
+            if (currentIndex === 0) { nextIndex = 4; isFighterA = true; }
+            else if (currentIndex === 1) { nextIndex = 4; isFighterA = false; }
+            else if (currentIndex === 2) { nextIndex = 5; isFighterA = true; }
+            else if (currentIndex === 3) { nextIndex = 5; isFighterA = false; }
+            else if (currentIndex === 4) { nextIndex = 6; isFighterA = true; }
+            else if (currentIndex === 5) { nextIndex = 6; isFighterA = false; }
+          } else if (siblingMatches.length === 15) {
+            if (currentIndex < 8) {
+              nextIndex = 8 + Math.floor(currentIndex / 2);
+              isFighterA = currentIndex % 2 === 0;
+            } else if (currentIndex < 12) {
+              nextIndex = 12 + Math.floor((currentIndex - 8) / 2);
+              isFighterA = (currentIndex - 8) % 2 === 0;
+            } else if (currentIndex < 14) {
+              nextIndex = 14;
+              isFighterA = currentIndex === 12;
+            }
+          }
+
+          if (nextIndex !== -1 && nextIndex < siblingMatches.length) {
+            const nextMatch = siblingMatches[nextIndex];
+            const updatePayload = isFighterA
+              ? { fighter_a_id: winnerId }
+              : { fighter_b_id: winnerId };
+
+            const { error: nextError } = await supabase
+              .from("matches")
+              .update(updatePayload)
+              .eq("id", nextMatch.id);
+
+            if (nextError) console.error("Error propagating winner:", nextError);
+          }
+        }
+      }
+
+      alert("Winner recorded and bracket updated!");
       setRefreshKey((prev) => prev + 1);
     } catch (err: any) {
       alert("Error: " + err.message);
@@ -549,7 +686,7 @@ export default function AdminPage() {
                         padding: '14px 16px',
                         border: '1px solid var(--line)',
                         borderRadius: '8px',
-                        background: '#fff'
+                        background: 'var(--panel)'
                       }}
                     >
                       <div>
@@ -623,7 +760,7 @@ export default function AdminPage() {
                           padding: '16px',
                           border: '1px solid var(--line)',
                           borderRadius: '8px',
-                          background: '#fff'
+                          background: 'var(--panel)'
                         }}
                       >
                         <div>
