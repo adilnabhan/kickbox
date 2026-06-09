@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { SupabaseStatus } from "@/components/SupabaseStatus";
+import { generateMatchPDF, classifyFighterLocal, WAK1F_AGE_CATEGORIES, MatchData, formatDivisionKey } from "@/lib/api";
 
 type Championship = {
   id: string;
@@ -23,13 +24,14 @@ type Registration = {
   status: string;
   gender: string;
   weight_kg: number;
-  profiles?: { full_name: string };
+  profiles?: { id: string; full_name: string };
   age_categories?: { name: string };
   weight_categories?: { name: string };
 };
 
 type Match = {
   id: string;
+  championship_id?: string;
   match_number: number;
   round_name: string;
   fighter_a_id: string;
@@ -38,12 +40,24 @@ type Match = {
   ring_number: string;
   status: string;
   scheduled_at: string;
-  fighter_a?: { full_name: string };
-  fighter_b?: { full_name: string };
+  fighter_a?: { id: string; full_name: string };
+  fighter_b?: { id: string; full_name: string };
 };
+
+const FIGHTER_AVATARS = [
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuAF2diGzVgl-pM3cP24Lf8B9eMqXA3PidNJQfi1NKOunrE0KVj1RHa51hI_urTHXZ5f-xc7-PO-_j4Kutks9Udg4V06zyjpSlZD4ojg6p8XDKJMtrNZHfVHgCjrNq5nCsbkeSPFvFZcO-PaTap5n4fBtwwwFhl0jft7JXLb1ZMlr5b8f44iJXIpuIKXcF60OARF1jKGFbFt1FfuiMqb4QoZjEUF1e6c9ErUCWyhj6mkQHNaQt-K1-allYFjL-LxmHXjPLx6oZwI8qU",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuC6bWsplsCS4UGHKpWKXJQq1KUUcsRLGlsHWrNNpbcvcEHmpMgcMyerGtpH1q795l6r93sl7Q-hglKFhw9858luobS5J0v6ICQzQwSBOftWQ0HH3dKXsJf1k5_riRbAjSsPNLNPMNaQQBGufC9eZ6-dxFUAhFtH-UfimkMGciNDqEgF9Xvl8d4D8vNE6tNVkm8FRLb_gaTpx2vpKEQAkDJ_maaS3YhbJfKdY4C83waltnmQlzbEbKhHQ5uHJRQTyIDUzlUr-MFbVOA",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuBilR6AEOw6XI8chnAMPSMR4jr3Xd_qoC-cuT1Ypyjem3H8Eeen0rNEZQrPc4wEujigNoTiiJkWp1kWGBTyx1WQmzZSRPfzahm5KEZ5tDBqAqUMhRuWhbNGEKo_E5zw_IeRhPlTRmmGoiDWVDGtcMwjUghcpzQYr5JWuOIHOvAU1-kMBLwYHfosXM9jHJiiJR8_w8n7p_23LG-Bg-j1qUq-ifF5t9-dsN71NBahfmgHpj7YaW3fXnqwivC01KxF1gnxF4Dn4k_W4Mw",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuB-FYCUvmvqyziBU2PNnYw1BCT7T5zH3OZqclNUEzg528e0Zrv8-H133pDEfIkXUC5kWSMSgk8zdBEN9GBJyYWgZ93s02msQ89DnQ0z5ejUXMGgIgWst6WTZt91Q_hwcyq82OSKl5BWjPSHmIVkgkxZdBoHV7b_WFVhaWAznaQ_XD9OFSf6UbxuY1oY_ZMix7sL4ITr0jIR-Srj2_CQsQcgZV40fFofo_dX0bRDv7U73HjoOWOY_CJ-ptUEMNihJEDyHBt8Jq5AA5o",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuBb-ts7h7gBVrFDUtXrKM40kI6nUNEzyE9VVzzv17ZDFH2QGmuPM8ga_jQsSutlQXJBkOxy0msp1Due2dDcCTBdRc4_KjW9qBbkaMiXZknZuixm4dlynFMHXI5nQpFSLsCEg5BPx1hlyzYhDErwiVlLuFec3_wHhPvLxMYFxIw-BJ2v5_8zoOnDCTc1Ztkiuoaen0Fzd7d1QYg9YIqcAVkgBE5a4LZgEGp803BcrM6AijsRXs1KRA7X0b3E869-QtYAzTuIgIgfIZ4",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuCoDCjf1i6_is5zHeJZkoAT98S8ow6v0YaUx49wY90BJV9kOsKtuOIu5hJ3WyfFjSzqnGx7zvXKxSu_gmomgURy-q2DnDvMHBL-O8abmK9RXTrlc_RR07Hk7FazHz-4MasFYyevJxia6-zlizBMQRMjURKGDVPAw1PhVBrTqCw4ohKunK41r1qlu7eeEkbmxXjaFJxa_1i4wzGr0ZDebMbqnb-aeR1o3uPeqbzZMew3Uw5qgprCRej5SYMLPseWm24NiQD4cjZglbc",
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuC5eGh9U5Q8jFks0r9WyH0TWqxA2wnGfGjXIKThz_s165Csu3bjvidgt7OOfyb8I6OwpaDAdq_uvzwneTqQ8-j9y2hxaPPPc5G753ncRqIeC74nCSjZq6Ag6xDBKcuBW_bLSmEaUYVW1nlnfrVnCddgsuKAUXsC4eKxqLlw79v6iV_uscTxP2SENN53kvgTTn5dJ52k4GhqoRAWb1CSpxQOk4s9QO4G1pBlCXaXHXaT94ZUG1yVOi890NrksR6Z5jVuDcpplphppnA"
+];
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<"championships" | "registrations" | "matches">("championships");
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [selectedMatchCategory, setSelectedMatchCategory] = useState<string>("all");
 
   // Database Data States
   const [championships, setChampionships] = useState<Championship[]>([]);
@@ -55,6 +69,11 @@ export default function AdminPage() {
   // Loading & Action States
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // XLSX Upload States
+  const [xlsxPreview, setXlsxPreview] = useState<any[]>([]);
+  const [xlsxFileName, setXlsxFileName] = useState("");
+  const [xlsxImporting, setXlsxImporting] = useState(false);
 
   // Form States - Championships
   const [newChampName, setNewChampName] = useState("");
@@ -71,8 +90,83 @@ export default function AdminPage() {
   const [minWeight, setMinWeight] = useState(50);
   const [maxWeight, setMaxWeight] = useState(60);
 
+  // Check if Supabase is connected
+  useEffect(() => {
+    const savedMode = localStorage.getItem("kickbox_use_demo");
+    if (savedMode === "true") {
+      setIsDemoMode(true);
+      return;
+    } else if (savedMode === "false") {
+      setIsDemoMode(false);
+      return;
+    }
+
+    async function checkSupabase() {
+      try {
+        const { error } = await supabase
+          .from("championships")
+          .select("id")
+          .limit(1);
+        
+        if (error || process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder")) {
+          console.warn("Supabase not connected. Switching to Demo Mode.");
+          setIsDemoMode(true);
+        } else {
+          setIsDemoMode(false);
+        }
+      } catch (e) {
+        console.warn("Supabase not connected. Switching to Demo Mode.");
+        setIsDemoMode(true);
+      }
+    }
+    checkSupabase();
+  }, [refreshKey]);
+
+  function fetchLocalData() {
+    // Championships
+    let localChamps = JSON.parse(localStorage.getItem("kickbox_championships") || "[]");
+    if (localChamps.length === 0) {
+      const defaultChamp = {
+        id: "demo-championship-id",
+        name: "WAK-1F National Championship 2026",
+        venue: "Talkatora Indoor Stadium, New Delhi",
+        status: "active",
+        created_at: new Date().toISOString()
+      };
+      localChamps = [defaultChamp];
+      localStorage.setItem("kickbox_championships", JSON.stringify(localChamps));
+    }
+    setChampionships(localChamps);
+    if (localChamps.length > 0 && !selectedChampId) {
+      setSelectedChampId(localChamps[0].id);
+    }
+
+    // Age & Weight categories
+    const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
+    setAgeCategories(localAgeCats);
+
+    const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
+    setWeightCategories(localWeightCats);
+
+    // Registrations
+    const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+    setRegistrations(localRegs);
+
+    // Matches
+    const localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
+    setMatches(localMatches);
+  }
+
   // Fetch initial records
   useEffect(() => {
+    let active = true;
+
+    if (isDemoMode) {
+      fetchLocalData();
+      setLoading(false);
+      return;
+    }
+
     async function fetchData() {
       try {
         setLoading(true);
@@ -82,6 +176,7 @@ export default function AdminPage() {
           .from("championships")
           .select("*")
           .order("created_at", { ascending: false });
+        if (!active) return;
         setChampionships(champs || []);
         if (champs && champs.length > 0 && !selectedChampId) {
           setSelectedChampId(champs[0].id);
@@ -99,11 +194,12 @@ export default function AdminPage() {
             status,
             gender,
             weight_kg,
-            profiles:fighter_id (full_name),
+            profiles:fighter_id (id, full_name),
             age_categories:age_category_id (name),
             weight_categories:weight_category_id (name)
           `)
           .order("submitted_at", { ascending: false });
+        if (!active) return;
         setRegistrations((regs as any) || []);
 
         // Fetch Matches
@@ -111,6 +207,7 @@ export default function AdminPage() {
           .from("matches")
           .select(`
             id,
+            championship_id,
             match_number,
             round_name,
             fighter_a_id,
@@ -119,27 +216,55 @@ export default function AdminPage() {
             ring_number,
             status,
             scheduled_at,
-            fighter_a:fighter_a_id (full_name),
-            fighter_b:fighter_b_id (full_name)
+            fighter_a:fighter_a_id (id, full_name),
+            fighter_b:fighter_b_id (id, full_name)
           `)
           .order("match_number", { ascending: true });
+        if (!active) return;
         setMatches((mtch as any) || []);
 
         // Fetch Existing Categories
         const { data: ageCats } = await supabase.from("age_categories").select("*");
+        if (!active) return;
         setAgeCategories(ageCats || []);
 
         const { data: weightCats } = await supabase.from("weight_categories").select("*");
+        if (!active) return;
         setWeightCategories(weightCats || []);
 
       } catch (err) {
         console.error("Error loading admin data:", err);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }
     fetchData();
-  }, [refreshKey]);
+
+    return () => {
+      active = false;
+    };
+  }, [refreshKey, isDemoMode]);
+
+  // Synchronize Demo Mode data in real-time across multiple open tabs
+  useEffect(() => {
+    function handleStorageChange(e: StorageEvent) {
+      if (e.key && e.key.startsWith("kickbox_")) {
+        setRefreshKey((prev) => prev + 1);
+      }
+    }
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, []);
+
+  // Stable avatar helper
+  function getFighterAvatar(id?: string) {
+    if (!id) return FIGHTER_AVATARS[0];
+    let sum = 0;
+    for (let i = 0; i < id.length; i++) sum += id.charCodeAt(i);
+    return FIGHTER_AVATARS[sum % FIGHTER_AVATARS.length];
+  }
 
   // Create Championship Handler
   async function handleCreateChampionship(e: React.FormEvent) {
@@ -147,6 +272,27 @@ export default function AdminPage() {
     if (!newChampName || !newChampVenue) return;
 
     try {
+      if (isDemoMode) {
+        const localChamps = JSON.parse(localStorage.getItem("kickbox_championships") || "[]");
+        const newChamp = {
+          id: "champ-" + Math.random().toString(36).substring(2, 11),
+          name: newChampName,
+          venue: newChampVenue,
+          status: "active",
+          start_date: new Date().toISOString().split("T")[0],
+          end_date: new Date().toISOString().split("T")[0],
+          created_at: new Date().toISOString()
+        };
+        localChamps.push(newChamp);
+        localStorage.setItem("kickbox_championships", JSON.stringify(localChamps));
+        setSelectedChampId(newChamp.id);
+        alert("Championship created successfully!");
+        setNewChampName("");
+        setNewChampVenue("");
+        setRefreshKey((prev) => prev + 1);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("championships")
         .insert([
@@ -176,6 +322,23 @@ export default function AdminPage() {
     if (!selectedChampId || !newAgeName) return;
 
     try {
+      if (isDemoMode) {
+        const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
+        const newAge = {
+          id: "age-" + Math.random().toString(36).substring(2, 11),
+          championship_id: selectedChampId,
+          name: newAgeName,
+          min_age: Number(minAge),
+          max_age: Number(maxAge)
+        };
+        localAgeCats.push(newAge);
+        localStorage.setItem("kickbox_age_categories", JSON.stringify(localAgeCats));
+        alert("Age Division added!");
+        setNewAgeName("");
+        setRefreshKey((prev) => prev + 1);
+        return;
+      }
+
       const { error } = await supabase.from("age_categories").insert([
         {
           championship_id: selectedChampId,
@@ -186,7 +349,7 @@ export default function AdminPage() {
       ]);
 
       if (error) throw error;
-      alert("Age Category added!");
+      alert("Age Division added!");
       setNewAgeName("");
       setRefreshKey((prev) => prev + 1);
     } catch (err: any) {
@@ -200,6 +363,24 @@ export default function AdminPage() {
     if (!selectedChampId || !newWeightName) return;
 
     try {
+      if (isDemoMode) {
+        const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
+        const newWeight = {
+          id: "weight-" + Math.random().toString(36).substring(2, 11),
+          championship_id: selectedChampId,
+          gender: weightGender,
+          name: newWeightName,
+          min_weight: Number(minWeight),
+          max_weight: Number(maxWeight)
+        };
+        localWeightCats.push(newWeight);
+        localStorage.setItem("kickbox_weight_categories", JSON.stringify(localWeightCats));
+        alert("Weight Bracket added!");
+        setNewWeightName("");
+        setRefreshKey((prev) => prev + 1);
+        return;
+      }
+
       const { error } = await supabase.from("weight_categories").insert([
         {
           championship_id: selectedChampId,
@@ -211,7 +392,7 @@ export default function AdminPage() {
       ]);
 
       if (error) throw error;
-      alert("Weight Category added!");
+      alert("Weight Bracket added!");
       setNewWeightName("");
       setRefreshKey((prev) => prev + 1);
     } catch (err: any) {
@@ -222,6 +403,17 @@ export default function AdminPage() {
   // Update Registration Status Handler (Approve / Reject)
   async function handleUpdateRegStatus(id: string, status: string) {
     try {
+      if (isDemoMode) {
+        const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+        const idx = localRegs.findIndex((r: any) => r.id === id);
+        if (idx !== -1) {
+          localRegs[idx].status = status;
+          localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+        }
+        setRefreshKey((prev) => prev + 1);
+        return;
+      }
+
       const { error } = await supabase
         .from("registrations")
         .update({ status })
@@ -232,6 +424,65 @@ export default function AdminPage() {
     } catch (err: any) {
       alert("Error: " + err.message);
     }
+  }
+
+  // Supabase Category Helper
+  async function findOrCreateCategoriesSupabase(
+    ageName: string,
+    weightName: string,
+    gender: string,
+    championshipId: string
+  ) {
+    // Age Category
+    let { data: ageCat } = await supabase
+      .from("age_categories")
+      .select("id")
+      .eq("championship_id", championshipId)
+      .eq("name", ageName)
+      .maybeSingle();
+
+    if (!ageCat) {
+      const ageRule = WAK1F_AGE_CATEGORIES.find((r) => r.name === ageName);
+      const { data: newAge, error: ageErr } = await supabase
+        .from("age_categories")
+        .insert({
+          championship_id: championshipId,
+          name: ageName,
+          min_age: ageRule ? ageRule.minAge : 9,
+          max_age: ageRule ? ageRule.maxAge : 999,
+        })
+        .select("id")
+        .single();
+      if (ageErr) throw ageErr;
+      ageCat = newAge;
+    }
+
+    // Weight Category
+    let { data: weightCat } = await supabase
+      .from("weight_categories")
+      .select("id")
+      .eq("championship_id", championshipId)
+      .eq("name", weightName)
+      .eq("gender", gender)
+      .maybeSingle();
+
+    if (!weightCat) {
+      const { data: newWeight, error: wtErr } = await supabase
+        .from("weight_categories")
+        .insert({
+          championship_id: championshipId,
+          name: weightName,
+          gender: gender,
+          min_weight: 0,
+          max_weight: 0,
+        })
+        .select("id")
+        .single();
+      if (wtErr) throw wtErr;
+      weightCat = newWeight;
+    }
+
+    return { ageCatId: ageCat.id, weightCatId: weightCat.id };
   }
 
   // Automated Bracket Generator
@@ -263,105 +514,110 @@ export default function AdminPage() {
       let globalMatchCounter = 1;
       const matchesToInsert: any[] = [];
 
-      // Loop through each group to seed the tournament tree structure
+      // ── Helper: assign correct round names based on total stages ──────────
+      const getRoundNames = (stages: number): string[] => {
+        if (stages === 1) return ["Final"];
+        if (stages === 2) return ["Semi Final", "Final"];
+        if (stages === 3) return ["Quarter Final", "Semi Final", "Final"];
+        const earlyRounds = Array.from({ length: stages - 3 }, (_, i) => `Round ${i + 1}`);
+        return [...earlyRounds, "Quarter Final", "Semi Final", "Final"];
+      };
+
+      // ── Helper: get match index boundaries for each round ─────────────────
+      const getRoundBoundaries = (roundSizes: number[]): number[] => {
+        const starts: number[] = [];
+        let acc = 0;
+        for (const s of roundSizes) { starts.push(acc); acc += s; }
+        return starts;
+      };
+
+      // ── Loop through each category group ─────────────────────────────────
       for (const key in groups) {
         const groupFighters = groups[key];
         const numFighters = groupFighters.length;
         if (numFighters < 2) continue;
 
-        // Calculate next power of 2 for tree structure slots
+        // Next power of 2 = total bracket slots
         let P = 2;
-        while (P < numFighters) {
-          P *= 2;
-        }
+        while (P < numFighters) P *= 2;
 
-        const firstRoundSize = P / 2;
+        const stages = Math.log2(P);               // how many rounds total
+        const firstRoundSize = P / 2;              // matches in round 1
+        const roundNames = getRoundNames(stages);  // correct stage labels
 
-        // Pre-generate matches for this group (from first round down to final)
+        // Build round sizes array: [firstRoundSize, firstRoundSize/2, ..., 1]
+        const roundSizes: number[] = [];
+        let sz = firstRoundSize;
+        while (sz >= 1) { roundSizes.push(sz); sz = Math.floor(sz / 2); }
+
+        const roundStarts = getRoundBoundaries(roundSizes);
+
+        // ── Build all match slots ──────────────────────────────────────────
         const groupMatches: any[] = [];
-        let currentRoundSize = firstRoundSize;
-        while (currentRoundSize >= 1) {
-          let roundName = "Final";
-          if (currentRoundSize === 2) roundName = "Semi Final";
-          else if (currentRoundSize === 4) roundName = "Quarter Final";
-          else if (currentRoundSize === 8) roundName = "Round of 16";
-          else if (currentRoundSize > 8) roundName = `Round of ${currentRoundSize * 2}`;
-
-          for (let m = 0; m < currentRoundSize; m++) {
+        for (let r = 0; r < roundSizes.length; r++) {
+          for (let m = 0; m < roundSizes[r]; m++) {
             groupMatches.push({
               championship_id: selectedChampId,
-              match_number: -1, // Assigned sequentially later
-              round_name: roundName,
+              match_number: -1,
+              round_name: roundNames[r],
               fighter_a_id: null,
               fighter_b_id: null,
               winner_id: null,
               status: "scheduled",
-              ring_number: `Ring ${(globalMatchCounter % 2) + 1}`,
-              scheduled_at: new Date(Date.now() + globalMatchCounter * 20 * 60000).toISOString()
+              ring_number: `Ring ${(globalMatchCounter % 2) + 1} | CATEGORY:${key}`,
+              // Schedule each match 20 min apart, later rounds later in the day
+              scheduled_at: new Date(Date.now() + (globalMatchCounter + r * 60) * 20 * 60000).toISOString()
             });
           }
-          currentRoundSize = Math.floor(currentRoundSize / 2);
         }
 
-        // Seed fighters into the first round matches
+        // ── Seed fighters into round 1 slots ─────────────────────────────
         for (let i = 0; i < numFighters; i++) {
-          const matchIndex = Math.floor(i / 2);
+          const matchIdx = Math.floor(i / 2);
           if (i % 2 === 0) {
-            groupMatches[matchIndex].fighter_a_id = groupFighters[i].fighter_id;
+            groupMatches[matchIdx].fighter_a_id = groupFighters[i].fighter_id;
           } else {
-            groupMatches[matchIndex].fighter_b_id = groupFighters[i].fighter_id;
+            groupMatches[matchIdx].fighter_b_id = groupFighters[i].fighter_id;
           }
         }
 
-        // Handle byes in the first round (if fighter_a is present but no fighter_b)
+        // ── Handle byes (fighter with no opponent auto-advances) ───────────
         for (let m = 0; m < firstRoundSize; m++) {
           if (groupMatches[m].fighter_a_id && !groupMatches[m].fighter_b_id) {
             groupMatches[m].winner_id = groupMatches[m].fighter_a_id;
-            groupMatches[m].status = "completed";
+            groupMatches[m].status = "walkover";
           }
         }
 
-        // Auto-propagate byes into the subsequent rounds
+        // ── Propagate bye winners into next round ────────────────────────
         for (let idx = 0; idx < groupMatches.length; idx++) {
           const currentM = groupMatches[idx];
-          if (currentM.status === "completed" && currentM.winner_id) {
-            let nextIndex = -1;
-            let isFighterA = true;
-
-            if (groupMatches.length === 3) {
-              if (idx === 0) { nextIndex = 2; isFighterA = true; }
-              else if (idx === 1) { nextIndex = 2; isFighterA = false; }
-            } else if (groupMatches.length === 7) {
-              if (idx === 0) { nextIndex = 4; isFighterA = true; }
-              else if (idx === 1) { nextIndex = 4; isFighterA = false; }
-              else if (idx === 2) { nextIndex = 5; isFighterA = true; }
-              else if (idx === 3) { nextIndex = 5; isFighterA = false; }
-              else if (idx === 4) { nextIndex = 6; isFighterA = true; }
-              else if (idx === 5) { nextIndex = 6; isFighterA = false; }
-            } else if (groupMatches.length === 15) {
-              if (idx < 8) {
-                nextIndex = 8 + Math.floor(idx / 2);
-                isFighterA = idx % 2 === 0;
-              } else if (idx < 12) {
-                nextIndex = 12 + Math.floor((idx - 8) / 2);
-                isFighterA = (idx - 8) % 2 === 0;
-              } else if (idx < 14) {
-                nextIndex = 14;
-                isFighterA = idx === 12;
+          if ((currentM.status === "completed" || currentM.status === "walkover") && currentM.winner_id) {
+            // Find which round this match belongs to
+            let roundIdx = -1;
+            for (let r = 0; r < roundSizes.length; r++) {
+              if (idx >= roundStarts[r] && idx < roundStarts[r] + roundSizes[r]) {
+                roundIdx = r;
+                break;
               }
             }
+            if (roundIdx === -1 || roundIdx + 1 >= roundSizes.length) continue;
 
-            if (nextIndex !== -1 && nextIndex < groupMatches.length) {
+            const offset = idx - roundStarts[roundIdx];
+            const nextMatchIdx = roundStarts[roundIdx + 1] + Math.floor(offset / 2);
+            const isFighterA = offset % 2 === 0;
+
+            if (nextMatchIdx < groupMatches.length) {
               if (isFighterA) {
-                groupMatches[nextIndex].fighter_a_id = currentM.winner_id;
+                groupMatches[nextMatchIdx].fighter_a_id = currentM.winner_id;
               } else {
-                groupMatches[nextIndex].fighter_b_id = currentM.winner_id;
+                groupMatches[nextMatchIdx].fighter_b_id = currentM.winner_id;
               }
             }
           }
         }
 
-        // Assign global match numbers
+        // ── Assign global match numbers ───────────────────────────────────
         groupMatches.forEach((m) => {
           m.match_number = globalMatchCounter++;
           matchesToInsert.push(m);
@@ -370,6 +626,33 @@ export default function AdminPage() {
 
       if (matchesToInsert.length === 0) {
         alert("Not enough fighters in the same age/weight groups to seed brackets.");
+        return;
+      }
+
+      if (isDemoMode) {
+        let localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
+        // Clear previous matches for this championship
+        localMatches = localMatches.filter((m: any) => m.championship_id !== selectedChampId);
+        
+        // Assign UUIDs/IDs for local matches
+        const matchesWithIds = matchesToInsert.map((m) => ({
+          ...m,
+          id: "match-" + Math.random().toString(36).substring(2, 11),
+          fighter_a: m.fighter_a_id ? {
+            id: m.fighter_a_id,
+            full_name: registrations.find(r => r.fighter_id === m.fighter_a_id)?.profiles?.full_name || "Fighter A"
+          } : null,
+          fighter_b: m.fighter_b_id ? {
+            id: m.fighter_b_id,
+            full_name: registrations.find(r => r.fighter_id === m.fighter_b_id)?.profiles?.full_name || "Fighter B"
+          } : null,
+        }));
+        
+        localMatches.push(...matchesWithIds);
+        localStorage.setItem("kickbox_matches", JSON.stringify(localMatches));
+        
+        alert(`Brackets generated successfully! Created ${matchesWithIds.length} matches.`);
+        setRefreshKey((prev) => prev + 1);
         return;
       }
 
@@ -392,6 +675,75 @@ export default function AdminPage() {
   async function handleRecordWinner(matchId: string, winnerId: string) {
     if (!winnerId) return;
     try {
+      if (isDemoMode) {
+        let localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
+        const matchIdx = localMatches.findIndex((m: any) => m.id === matchId);
+        if (matchIdx === -1) throw new Error("Match not found");
+        
+        // Update current match
+        localMatches[matchIdx].winner_id = winnerId;
+        localMatches[matchIdx].status = "completed";
+        
+        const currentMatch = localMatches[matchIdx];
+        
+        // Get all matches in same category, sorted by match_number
+        const categoryPart = currentMatch.ring_number?.split(" | CATEGORY:")[1] || "";
+        const siblingMatches = localMatches
+          .filter((m: any) => m.championship_id === currentMatch.championship_id && (m.ring_number?.split(" | CATEGORY:")[1] || "") === categoryPart)
+          .sort((a: any, b: any) => a.match_number - b.match_number);
+          
+        const currentIndex = siblingMatches.findIndex((m: any) => m.id === matchId);
+        if (currentIndex !== -1) {
+          // Rebuild round boundaries from match count
+          const totalMatches = siblingMatches.length;
+          // total = frs + frs/2 + ... + 1 = 2*frs - 1, so frs = (total+1)/2
+          const frs = Math.round((totalMatches + 1) / 2);
+          const roundSizes: number[] = [];
+          let sz = frs;
+          while (sz >= 1) { roundSizes.push(sz); sz = Math.floor(sz / 2); }
+          
+          // Find round boundaries
+          const roundStarts: number[] = [];
+          let acc = 0;
+          for (const s of roundSizes) { roundStarts.push(acc); acc += s; }
+
+          // Which round is currentIndex in?
+          let roundIdx = -1;
+          for (let r = 0; r < roundSizes.length; r++) {
+            if (currentIndex >= roundStarts[r] && currentIndex < roundStarts[r] + roundSizes[r]) {
+              roundIdx = r;
+              break;
+            }
+          }
+
+          if (roundIdx !== -1 && roundIdx + 1 < roundSizes.length) {
+            const offset = currentIndex - roundStarts[roundIdx];
+            const nextSiblingIdx = roundStarts[roundIdx + 1] + Math.floor(offset / 2);
+            const isFighterA = offset % 2 === 0;
+            
+            if (nextSiblingIdx < siblingMatches.length) {
+              const nextMatchSibling = siblingMatches[nextSiblingIdx];
+              const realNextMatchIdx = localMatches.findIndex((m: any) => m.id === nextMatchSibling.id);
+              if (realNextMatchIdx !== -1) {
+                const winnerName = registrations.find(r => r.fighter_id === winnerId)?.profiles?.full_name || "Winner";
+                if (isFighterA) {
+                  localMatches[realNextMatchIdx].fighter_a_id = winnerId;
+                  localMatches[realNextMatchIdx].fighter_a = { id: winnerId, full_name: winnerName };
+                } else {
+                  localMatches[realNextMatchIdx].fighter_b_id = winnerId;
+                  localMatches[realNextMatchIdx].fighter_b = { id: winnerId, full_name: winnerName };
+                }
+              }
+            }
+          }
+        }
+        
+        localStorage.setItem("kickbox_matches", JSON.stringify(localMatches));
+        alert("Winner recorded and bracket updated!");
+        setRefreshKey((prev) => prev + 1);
+        return;
+      }
+
       // 1. Update the current match as completed with the winner
       const { error: updateError } = await supabase
         .from("matches")
@@ -413,53 +765,48 @@ export default function AdminPage() {
       if (fetchError || !currentMatch) throw fetchError || new Error("Match not found");
 
       // 3. Fetch all sibling matches of the same championship to trace progression
-      const { data: siblingMatches } = await supabase
+      const { data: allSiblingMatches } = await supabase
         .from("matches")
         .select("*")
         .eq("championship_id", currentMatch.championship_id)
         .order("match_number", { ascending: true });
 
-      if (siblingMatches && siblingMatches.length > 0) {
+      if (allSiblingMatches && allSiblingMatches.length > 0) {
+        const categoryPart = currentMatch.ring_number?.split(" | CATEGORY:")[1] || "";
+        const siblingMatches = allSiblingMatches
+          .filter((m) => (m.ring_number?.split(" | CATEGORY:")[1] || "") === categoryPart)
+          .sort((a, b) => a.match_number - b.match_number);
+
         const currentIndex = siblingMatches.findIndex((m) => m.id === matchId);
         if (currentIndex !== -1) {
-          let nextIndex = -1;
-          let isFighterA = true;
+          const totalMatches = siblingMatches.length;
+          const frs = Math.round((totalMatches + 1) / 2);
+          const roundSizes: number[] = [];
+          let sz = frs;
+          while (sz >= 1) { roundSizes.push(sz); sz = Math.floor(sz / 2); }
 
-          if (siblingMatches.length === 3) {
-            if (currentIndex === 0) { nextIndex = 2; isFighterA = true; }
-            else if (currentIndex === 1) { nextIndex = 2; isFighterA = false; }
-          } else if (siblingMatches.length === 7) {
-            if (currentIndex === 0) { nextIndex = 4; isFighterA = true; }
-            else if (currentIndex === 1) { nextIndex = 4; isFighterA = false; }
-            else if (currentIndex === 2) { nextIndex = 5; isFighterA = true; }
-            else if (currentIndex === 3) { nextIndex = 5; isFighterA = false; }
-            else if (currentIndex === 4) { nextIndex = 6; isFighterA = true; }
-            else if (currentIndex === 5) { nextIndex = 6; isFighterA = false; }
-          } else if (siblingMatches.length === 15) {
-            if (currentIndex < 8) {
-              nextIndex = 8 + Math.floor(currentIndex / 2);
-              isFighterA = currentIndex % 2 === 0;
-            } else if (currentIndex < 12) {
-              nextIndex = 12 + Math.floor((currentIndex - 8) / 2);
-              isFighterA = (currentIndex - 8) % 2 === 0;
-            } else if (currentIndex < 14) {
-              nextIndex = 14;
-              isFighterA = currentIndex === 12;
+          const roundStarts: number[] = [];
+          let acc = 0;
+          for (const s of roundSizes) { roundStarts.push(acc); acc += s; }
+
+          let roundIdx = -1;
+          for (let r = 0; r < roundSizes.length; r++) {
+            if (currentIndex >= roundStarts[r] && currentIndex < roundStarts[r] + roundSizes[r]) {
+              roundIdx = r; break;
             }
           }
 
-          if (nextIndex !== -1 && nextIndex < siblingMatches.length) {
-            const nextMatch = siblingMatches[nextIndex];
-            const updatePayload = isFighterA
-              ? { fighter_a_id: winnerId }
-              : { fighter_b_id: winnerId };
+          if (roundIdx !== -1 && roundIdx + 1 < roundSizes.length) {
+            const offset = currentIndex - roundStarts[roundIdx];
+            const nextSiblingIdx = roundStarts[roundIdx + 1] + Math.floor(offset / 2);
+            const isFighterA = offset % 2 === 0;
 
-            const { error: nextError } = await supabase
-              .from("matches")
-              .update(updatePayload)
-              .eq("id", nextMatch.id);
-
-            if (nextError) console.error("Error propagating winner:", nextError);
+            if (nextSiblingIdx < siblingMatches.length) {
+              const nextMatch = siblingMatches[nextSiblingIdx];
+              const updatePayload = isFighterA ? { fighter_a_id: winnerId } : { fighter_b_id: winnerId };
+              const { error: nextError } = await supabase.from("matches").update(updatePayload).eq("id", nextMatch.id);
+              if (nextError) console.error("Error propagating winner:", nextError);
+            }
           }
         }
       }
@@ -471,113 +818,773 @@ export default function AdminPage() {
     }
   }
 
-  // Helpers to handle single / array profile fields
+  // Delete Championship Handler
+  async function handleDeleteChampionship(id: string) {
+    if (!confirm("Are you sure you want to delete this championship? This will permanently delete all associated divisions, registrations, and matches!")) return;
+    try {
+      if (isDemoMode) {
+        let localChamps = JSON.parse(localStorage.getItem("kickbox_championships") || "[]");
+        localChamps = localChamps.filter((c: any) => c.id !== id);
+        localStorage.setItem("kickbox_championships", JSON.stringify(localChamps));
+        
+        let localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+        localRegs = localRegs.filter((r: any) => r.championship_id !== id);
+        localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+        
+        let localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
+        localMatches = localMatches.filter((m: any) => m.championship_id !== id);
+        localStorage.setItem("kickbox_matches", JSON.stringify(localMatches));
+        
+        if (selectedChampId === id) {
+          setSelectedChampId(localChamps[0]?.id || "");
+        }
+        
+        alert("Championship deleted successfully!");
+        setRefreshKey((prev) => prev + 1);
+        return;
+      }
+
+      const { error } = await supabase
+        .from("championships")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+      alert("Championship deleted successfully!");
+      setRefreshKey((prev) => prev + 1);
+    } catch (err: any) {
+      alert("Error deleting championship: " + err.message);
+    }
+  }
+
+  // Load Test Cohort (10+ Fighters for Age 9-10)
+  async function handleLoadTestCohort() {
+    try {
+      setLoading(true);
+      
+      let targetChampId = selectedChampId;
+      if (!targetChampId) {
+        if (championships.length > 0) {
+          targetChampId = championships[0].id;
+          setSelectedChampId(targetChampId);
+        } else {
+          const newChamp = {
+            id: isDemoMode ? "demo-championship-id" : crypto.randomUUID(),
+            name: "WAK-1F National Championship 2026",
+            venue: "Talkatora Indoor Stadium, New Delhi",
+            status: "active",
+            start_date: new Date().toISOString().split("T")[0],
+            end_date: new Date().toISOString().split("T")[0],
+            created_at: new Date().toISOString()
+          };
+          if (isDemoMode) {
+            localStorage.setItem("kickbox_championships", JSON.stringify([newChamp]));
+            setChampionships([newChamp]);
+          } else {
+            const { error } = await supabase.from("championships").insert([newChamp]);
+            if (error) throw error;
+            setChampionships([newChamp]);
+          }
+          targetChampId = newChamp.id;
+          setSelectedChampId(targetChampId);
+        }
+      }
+
+      const testFighters = [
+        // 9-10 Male -24kg (4 fighters)
+        { name: "Aarav Sharma", age: 9, gender: "Male", weight: 23.0 },
+        { name: "Kabir Verma", age: 9, gender: "Male", weight: 22.5 },
+        { name: "Vivaan Sen", age: 10, gender: "Male", weight: 23.8 },
+        { name: "Reyansh Gupta", age: 10, gender: "Male", weight: 21.5 },
+        
+        // 9-10 Male -27kg (4 fighters)
+        { name: "Ishan Iyer", age: 9, gender: "Male", weight: 26.2 },
+        { name: "Atharv Joshi", age: 10, gender: "Male", weight: 25.8 },
+        { name: "Arjun Nair", age: 10, gender: "Male", weight: 24.9 },
+        { name: "Dhruv Mehta", age: 9, gender: "Male", weight: 26.9 },
+        
+        // 9-10 Male -30kg (2 fighters)
+        { name: "Rudra Patel", age: 10, gender: "Male", weight: 29.5 },
+        { name: "Ayaan Ali", age: 9, gender: "Male", weight: 28.2 },
+
+        // 9-10 Female -24kg (2 fighters)
+        { name: "Ananya Roy", age: 9, gender: "Female", weight: 23.2 },
+        { name: "Diya Sharma", age: 10, gender: "Female", weight: 22.8 }
+      ];
+
+      if (isDemoMode) {
+        const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+        const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
+        const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
+        
+        testFighters.forEach((f) => {
+          const classification = classifyFighterLocal({
+            fighter_id: "fighter-" + Math.random().toString(36).substring(2, 11),
+            full_name: f.name,
+            age: f.age,
+            gender: f.gender,
+            weight_kg: f.weight
+          });
+          const ageCategoryName = classification.age_category;
+          const weightCategoryName = classification.weight_category;
+          
+          let ageCat = localAgeCats.find((a: any) => a.championship_id === targetChampId && a.name === ageCategoryName);
+          if (!ageCat) {
+            ageCat = {
+              id: "age-" + Math.random().toString(36).substring(2, 11),
+              championship_id: targetChampId,
+              name: ageCategoryName,
+              min_age: 9,
+              max_age: 10
+            };
+            localAgeCats.push(ageCat);
+          }
+          
+          let weightCat = localWeightCats.find((w: any) => w.championship_id === targetChampId && w.name === weightCategoryName && w.gender.toLowerCase() === f.gender.toLowerCase());
+          if (!weightCat) {
+            weightCat = {
+              id: "weight-" + Math.random().toString(36).substring(2, 11),
+              championship_id: targetChampId,
+              gender: f.gender.toLowerCase(),
+              name: weightCategoryName,
+              min_weight: 0,
+              max_weight: 0
+            };
+            localWeightCats.push(weightCat);
+          }
+          
+          const newReg = {
+            id: "reg-" + Math.random().toString(36).substring(2, 11),
+            championship_id: targetChampId,
+            fighter_id: "fighter-" + Math.random().toString(36).substring(2, 11),
+            age_category_id: ageCat.id,
+            weight_category_id: weightCat.id,
+            status: "approved",
+            gender: f.gender.toLowerCase(),
+            weight_kg: f.weight,
+            profiles: {
+              id: "fighter-" + Math.random().toString(36).substring(2, 11),
+              full_name: f.name
+            },
+            age_categories: { name: ageCategoryName },
+            weight_categories: { name: weightCategoryName }
+          };
+          localRegs.push(newReg);
+        });
+        
+        localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+        localStorage.setItem("kickbox_age_categories", JSON.stringify(localAgeCats));
+        localStorage.setItem("kickbox_weight_categories", JSON.stringify(localWeightCats));
+        
+        alert(`Successfully imported ${testFighters.length} test cohort fighters in Local Demo Mode! Divisions were automatically assigned.`);
+        setRefreshKey((prev) => prev + 1);
+      } else {
+        let successCount = 0;
+        for (const f of testFighters) {
+          const classification = classifyFighterLocal({
+            fighter_id: "fighter-" + Math.random().toString(36).substring(2, 11),
+            full_name: f.name,
+            age: f.age,
+            gender: f.gender,
+            weight_kg: f.weight
+          });
+          const ageCategoryName = classification.age_category;
+          const weightCategoryName = classification.weight_category;
+
+          const { ageCatId, weightCatId } = await findOrCreateCategoriesSupabase(
+            ageCategoryName,
+            weightCategoryName,
+            f.gender.toLowerCase(),
+            targetChampId
+          );
+
+          const randomFighterId = crypto.randomUUID();
+          
+          const { error: profileErr } = await supabase
+            .from("profiles")
+            .insert({
+              id: randomFighterId,
+              full_name: f.name
+            });
+            
+          if (profileErr) {
+            console.error("Profile insert error:", profileErr);
+            continue;
+          }
+
+          const { error: regErr } = await supabase
+            .from("registrations")
+            .insert({
+              championship_id: targetChampId,
+              fighter_id: randomFighterId,
+              age_category_id: ageCatId,
+              weight_category_id: weightCatId,
+              gender: f.gender.toLowerCase(),
+              weight_kg: f.weight,
+              status: "approved"
+            });
+
+          if (regErr) {
+            console.error("Registration insert error:", regErr);
+            continue;
+          }
+          successCount++;
+        }
+        alert(`Successfully imported ${successCount} test cohort fighters in Supabase Mode!`);
+        setRefreshKey((prev) => prev + 1);
+      }
+    } catch (e: any) {
+      alert("Test cohort import error: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Load 100 Fighters Sample
+  async function handleLoadSampleFighters() {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/seed-sample");
+      if (!res.ok) throw new Error("Failed to load sample fighters endpoint");
+      const data = await res.json();
+      if (!data.success || !data.fighters) {
+        throw new Error(data.error || "No fighters found in sample endpoint");
+      }
+      
+      const sampleFighters = data.fighters;
+      if (isDemoMode) {
+        const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+        const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
+        const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
+        
+        sampleFighters.forEach((f: any) => {
+          const classification = classifyFighterLocal({
+            fighter_id: f.fighter_id || "fighter-" + Math.random().toString(36).substring(2, 11),
+            full_name: f.full_name || f.name || "Unknown",
+            age: f.age,
+            gender: f.gender,
+            weight_kg: f.weight_kg || f.weight || 60
+          });
+          const ageCategoryName = classification.age_category;
+          const weightCategoryName = classification.weight_category;
+          
+          let ageCat = localAgeCats.find((a: any) => a.championship_id === selectedChampId && a.name === ageCategoryName);
+          if (!ageCat) {
+            ageCat = {
+              id: "age-" + Math.random().toString(36).substring(2, 11),
+              championship_id: selectedChampId,
+              name: ageCategoryName,
+              min_age: 10,
+              max_age: 18
+            };
+            localAgeCats.push(ageCat);
+          }
+          
+          let weightCat = localWeightCats.find((w: any) => w.championship_id === selectedChampId && w.name === weightCategoryName && w.gender.toLowerCase() === f.gender.toLowerCase());
+          if (!weightCat) {
+            weightCat = {
+              id: "weight-" + Math.random().toString(36).substring(2, 11),
+              championship_id: selectedChampId,
+              gender: f.gender.toLowerCase(),
+              name: weightCategoryName,
+              min_weight: 0,
+              max_weight: 0
+            };
+            localWeightCats.push(weightCat);
+          }
+          
+          const newReg = {
+            id: "reg-" + Math.random().toString(36).substring(2, 11),
+            championship_id: selectedChampId,
+            fighter_id: "fighter-" + Math.random().toString(36).substring(2, 11),
+            age_category_id: ageCat.id,
+            weight_category_id: weightCat.id,
+            status: "approved",
+            gender: f.gender.toLowerCase(),
+            weight_kg: f.weight_kg || f.weight || 60,
+            profiles: {
+              id: f.fighter_id || "fighter-" + Math.random().toString(36).substring(2, 11),
+              full_name: f.full_name || f.name || "Unknown"
+            },
+            age_categories: { name: ageCategoryName },
+            weight_categories: { name: weightCategoryName }
+          };
+          localRegs.push(newReg);
+        });
+        
+        localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+        localStorage.setItem("kickbox_age_categories", JSON.stringify(localAgeCats));
+        localStorage.setItem("kickbox_weight_categories", JSON.stringify(localWeightCats));
+        
+        alert(`Successfully imported ${sampleFighters.length} fighters in Local Demo Mode! Divisions were automatically assigned.`);
+        setRefreshKey((prev) => prev + 1);
+      } else {
+        let successCount = 0;
+        for (const f of sampleFighters) {
+          const classification = classifyFighterLocal({
+            fighter_id: f.fighter_id || "fighter-" + Math.random().toString(36).substring(2, 11),
+            full_name: f.full_name || f.name || "Unknown",
+            age: f.age,
+            gender: f.gender,
+            weight_kg: f.weight_kg || f.weight || 60
+          });
+          const ageCategoryName = classification.age_category;
+          const weightCategoryName = classification.weight_category;
+
+          const { ageCatId, weightCatId } = await findOrCreateCategoriesSupabase(
+            ageCategoryName,
+            weightCategoryName,
+            f.gender.toLowerCase(),
+            selectedChampId
+          );
+
+          const randomFighterId = crypto.randomUUID();
+          
+          const { error: profileErr } = await supabase
+            .from("profiles")
+            .insert({
+              id: randomFighterId,
+              full_name: f.full_name || f.name || "Unknown"
+            });
+            
+          if (profileErr) {
+            console.error("Profile insert error:", profileErr);
+            continue;
+          }
+
+          const { error: regErr } = await supabase
+            .from("registrations")
+            .insert({
+              championship_id: selectedChampId,
+              fighter_id: randomFighterId,
+              age_category_id: ageCatId,
+              weight_category_id: weightCatId,
+              gender: f.gender.toLowerCase(),
+              weight_kg: f.weight_kg || f.weight || 60,
+              status: "approved"
+            });
+
+          if (regErr) {
+            console.error("Registration insert error:", regErr);
+            continue;
+          }
+          successCount++;
+        }
+        alert(`Successfully imported ${successCount} fighters in Supabase Mode!`);
+        setRefreshKey((prev) => prev + 1);
+      }
+    } catch (e: any) {
+      alert("Import error: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── XLSX BULK UPLOAD ──────────────────────────────────────────────────────
+  async function handleXLSXFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setXlsxFileName(file.name);
+    setXlsxPreview([]);
+
+    try {
+      const XLSX = (await import("xlsx")).default;
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      // Normalise column names (case-insensitive, handle variants)
+      const normalised = rows.map((row: any) => {
+        const get = (...keys: string[]) => {
+          for (const k of keys) {
+            const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/[\s_()\-]/g, "") === k.toLowerCase().replace(/[\s_()\-]/g, ""));
+            if (found && row[found] !== "") return row[found];
+          }
+          return "";
+        };
+        const name = String(get("fullname", "name", "fullName", "fighter_name") || "").trim();
+        const age = Number(get("age", "Age") || 0);
+        const genderRaw = String(get("gender", "Gender", "sex") || "").trim().toLowerCase();
+        const gender = genderRaw === "m" || genderRaw === "male" ? "Male" : genderRaw === "f" || genderRaw === "female" ? "Female" : "";
+        const weight = Number(get("weight", "weightkg", "weight_kg", "Weight") || 0);
+        const club = String(get("club", "gym", "gymclub", "club_name") || "").trim();
+        const coach = String(get("coach", "coach_name") || "").trim();
+        return { name, age, gender, weight, club, coach };
+      }).filter(r => r.name && r.age > 0 && r.weight > 0 && r.gender);
+
+      setXlsxPreview(normalised.slice(0, 200)); // cap preview at 200 rows
+    } catch (err: any) {
+      alert("Error reading Excel file: " + err.message);
+    }
+    // Reset file input so same file can be re-selected
+    e.target.value = "";
+  }
+
+  async function handleXLSXImport() {
+    if (!xlsxPreview.length || !selectedChampId) return;
+    setXlsxImporting(true);
+    try {
+      const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
+      const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
+      const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+      let successCount = 0;
+
+      for (const f of xlsxPreview) {
+        const fighterId = "fighter-" + Math.random().toString(36).substring(2, 11);
+        const classification = classifyFighterLocal({
+          fighter_id: fighterId,
+          full_name: f.name,
+          age: f.age,
+          gender: f.gender,
+          weight_kg: f.weight
+        });
+
+        if (isDemoMode) {
+          const ageCategoryName = classification.age_category;
+          const weightCategoryName = classification.weight_category;
+
+          let ageCat = localAgeCats.find((a: any) => a.championship_id === selectedChampId && a.name === ageCategoryName);
+          if (!ageCat) {
+            ageCat = { id: "age-" + Math.random().toString(36).substring(2, 11), championship_id: selectedChampId, name: ageCategoryName, min_age: 9, max_age: 99 };
+            localAgeCats.push(ageCat);
+          }
+          let weightCat = localWeightCats.find((w: any) => w.championship_id === selectedChampId && w.name === weightCategoryName && w.gender.toLowerCase() === f.gender.toLowerCase());
+          if (!weightCat) {
+            weightCat = { id: "weight-" + Math.random().toString(36).substring(2, 11), championship_id: selectedChampId, gender: f.gender.toLowerCase(), name: weightCategoryName, min_weight: 0, max_weight: 0 };
+            localWeightCats.push(weightCat);
+          }
+          localRegs.push({
+            id: "reg-" + Math.random().toString(36).substring(2, 11),
+            championship_id: selectedChampId,
+            fighter_id: fighterId,
+            age_category_id: ageCat.id,
+            weight_category_id: weightCat.id,
+            status: "approved",
+            gender: f.gender.toLowerCase(),
+            weight_kg: f.weight,
+            profiles: { id: fighterId, full_name: f.name },
+            age_categories: { name: ageCategoryName },
+            weight_categories: { name: weightCategoryName }
+          });
+          successCount++;
+        } else {
+          const { ageCatId, weightCatId } = await findOrCreateCategoriesSupabase(
+            classification.age_category, classification.weight_category, f.gender.toLowerCase(), selectedChampId
+          );
+          const { error: profileErr } = await supabase.from("profiles").insert({ id: fighterId, full_name: f.name });
+          if (profileErr) continue;
+          const { error: regErr } = await supabase.from("registrations").insert({
+            championship_id: selectedChampId, fighter_id: fighterId,
+            age_category_id: ageCatId, weight_category_id: weightCatId,
+            gender: f.gender.toLowerCase(), weight_kg: f.weight, status: "approved",
+            date_of_birth: new Date(new Date().getFullYear() - f.age, 0, 1).toISOString().split("T")[0]
+          });
+          if (!regErr) successCount++;
+        }
+      }
+
+      if (isDemoMode) {
+        localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+        localStorage.setItem("kickbox_age_categories", JSON.stringify(localAgeCats));
+        localStorage.setItem("kickbox_weight_categories", JSON.stringify(localWeightCats));
+      }
+
+      alert(`✅ Imported ${successCount} fighters successfully! Categories auto-assigned by WAK-1F rules.`);
+      setXlsxPreview([]);
+      setXlsxFileName("");
+      setRefreshKey(prev => prev + 1);
+    } catch (err: any) {
+      alert("Import error: " + err.message);
+    } finally {
+      setXlsxImporting(false);
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  function handleClearLocalData() {
+    if (!confirm("Are you sure you want to clear all local data? This will reset all local championships, registrations, and matches.")) return;
+    localStorage.removeItem("kickbox_championships");
+    localStorage.removeItem("kickbox_registrations");
+    localStorage.removeItem("kickbox_age_categories");
+    localStorage.removeItem("kickbox_weight_categories");
+    localStorage.removeItem("kickbox_matches");
+    setRefreshKey((prev) => prev + 1);
+    alert("Local Storage cleared successfully.");
+  }
+
+  function handleDownloadPDF() {
+    if (!selectedChampId) return;
+    const champ = championships.find(c => c.id === selectedChampId);
+    const champName = champ ? champ.name : "Kickboxing Championship";
+
+    const champRegs = registrations.filter(r => r.championship_id === selectedChampId);
+    
+    const divMap: { [key: string]: any } = {};
+    champRegs.forEach(reg => {
+      const ageCategoryName = getCategoryName(reg.age_categories);
+      const weightCategoryName = getCategoryName(reg.weight_categories);
+      const key = `${ageCategoryName}-${weightCategoryName}-${reg.gender}`;
+      
+      if (!divMap[key]) {
+        divMap[key] = {
+          division_id: key,
+          age_category: ageCategoryName,
+          gender: reg.gender,
+          weight_category: weightCategoryName,
+          fighters: [],
+          fighter_count: 0,
+          bracket_status: "Ready",
+          bracket_size: ""
+        };
+      }
+      divMap[key].fighters.push({
+        fighter_id: reg.fighter_id,
+        full_name: getFighterName(reg.profiles),
+        age_category: ageCategoryName,
+        gender: reg.gender,
+        weight_category: weightCategoryName,
+        weight_kg: reg.weight_kg,
+        division_id: key
+      });
+    });
+
+    const divisions = Object.values(divMap).map((d: any) => {
+      d.fighter_count = d.fighters.length;
+      let count = d.fighter_count;
+      let status = "Ready";
+      let size = "None";
+      if (count <= 0) { status = "Empty"; size = "None"; }
+      else if (count === 1) { status = "Waiting"; size = "None"; }
+      else if (count === 2) { status = "Ready"; size = "Direct Final"; }
+      else if (count <= 4) { status = "Ready"; size = "Semi Final"; }
+      else if (count <= 8) { status = "Ready"; size = "Quarter Final"; }
+      else if (count <= 16) { status = "Ready"; size = "Round of 16"; }
+      else { status = "Ready"; size = `Round of 32`; }
+      
+      d.bracket_status = status;
+      d.bracket_size = size;
+      return d;
+    });
+
+    const champMatches = matches.filter(m => m.championship_id === selectedChampId);
+    
+    const formattedMatches: MatchData[] = champMatches.map(m => {
+      const categoryPart = m.ring_number?.split(" | CATEGORY:")[1] || "General";
+      return {
+        id: m.id,
+        championship_id: m.championship_id || selectedChampId,
+        division_id: categoryPart,
+        match_number: m.match_number,
+        round_name: m.round_name,
+        fighter_a_id: m.fighter_a_id || null,
+        fighter_b_id: m.fighter_b_id || null,
+        fighter_a_name: getFighterName(m.fighter_a),
+        fighter_b_name: getFighterName(m.fighter_b),
+        winner_id: m.winner_id || null,
+        ring_number: m.ring_number?.split(" | CATEGORY:")[0] || m.ring_number,
+        scheduled_at: m.scheduled_at || null,
+        status: m.status,
+        next_match_id: null,
+        next_slot: ""
+      };
+    });
+
+    generateMatchPDF(divisions, formattedMatches, champName);
+  }
+
+  // Helpers to handle profile fields
   function getFighterName(profileField: any) {
-    if (!profileField) return "Unknown Fighter";
-    if (Array.isArray(profileField)) return profileField[0]?.full_name || "Unknown Fighter";
-    return profileField.full_name || "Unknown Fighter";
+    if (!profileField) return "TBD (Bye)";
+    if (Array.isArray(profileField)) return profileField[0]?.full_name || "TBD (Bye)";
+    return profileField.full_name || "TBD (Bye)";
+  }
+
+  // Helper to find registration details for a fighter
+  function getFighterRegistrationDetails(fighterId?: string) {
+    if (!fighterId) return "";
+    const reg = registrations.find(r => r.fighter_id === fighterId);
+    if (!reg) return "";
+    const age = getCategoryName(reg.age_categories);
+    const weight = getCategoryName(reg.weight_categories);
+    return `${age} | ${weight}`;
   }
 
   function getCategoryName(categoryField: any) {
-    if (!categoryField) return "N/A";
-    if (Array.isArray(categoryField)) return categoryField[0]?.name || "N/A";
-    return categoryField.name || "N/A";
+    if (!categoryField) return "General";
+    if (Array.isArray(categoryField)) return categoryField[0]?.name || "General";
+    return categoryField.name || "General";
   }
 
   return (
-    <main className="shell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div className="brand">
-          <span className="brandMark">K</span>
-          <div>
-            <strong>Kickbox Admin</strong>
-            <small>Championship control</small>
-          </div>
+    <div className="app-container">
+      {/* Sidebar Navigation */}
+      <aside className="desktop-sidebar" aria-label="Desktop Admin navigation">
+        <div className="mb-md">
+          <h3 className="brand-text">Kickbox Admin</h3>
+          <p className="sidebar-subtitle">Operations Desk</p>
         </div>
 
-        <nav className="navList">
-          <a href="/" className="navList a">← Main Site</a>
+        <nav className="nav-menu">
+          <a href="/" className="nav-link" style={{ color: 'var(--text-secondary)' }}>
+            <span className="material-symbols-outlined">arrow_back</span>
+            <span>← Public Site</span>
+          </a>
+
           <button
-            className={activeTab === "championships" ? "active" : ""}
+            className={`nav-link ${activeTab === "championships" ? "active" : ""}`}
             onClick={() => setActiveTab("championships")}
-            style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: '#fff', padding: '12px 14px', borderRadius: '8px', cursor: 'pointer' }}
           >
-            Championships
+            <span className="material-symbols-outlined">emoji_events</span>
+            <span>Championships</span>
           </button>
+
           <button
-            className={activeTab === "registrations" ? "active" : ""}
+            className={`nav-link ${activeTab === "registrations" ? "active" : ""}`}
             onClick={() => setActiveTab("registrations")}
-            style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: '#fff', padding: '12px 14px', borderRadius: '8px', cursor: 'pointer' }}
           >
-            Fighter Registry
+            <span className="material-symbols-outlined">verified_user</span>
+            <span>Fighter Registry</span>
           </button>
+
           <button
-            className={activeTab === "matches" ? "active" : ""}
+            className={`nav-link ${activeTab === "matches" ? "active" : ""}`}
             onClick={() => setActiveTab("matches")}
-            style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', color: '#fff', padding: '12px 14px', borderRadius: '8px', cursor: 'pointer' }}
           >
-            Match Control
+            <span className="material-symbols-outlined">sports_kabaddi</span>
+            <span>Match Control</span>
           </button>
         </nav>
+
+        <div style={{ marginTop: 'auto' }}>
+          <button
+            onClick={handleGenerateBrackets}
+            className="btn-primary"
+            style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}
+          >
+            Auto Seed Brackets
+          </button>
+        </div>
       </aside>
 
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Tournament Control Desk</p>
-            <h1>Kickboxing Admin Operations</h1>
-          </div>
-          <div className="actions">
-            <button className="dark" type="button" onClick={handleGenerateBrackets}>
-              Auto Generate Brackets
+      {/* Main Canvas */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+        {/* Top Header */}
+        <header className="top-header">
+          <span className="brand-text">Kickbox Admin Desk</span>
+          <div className="header-actions">
+            <button
+              onClick={() => {
+                const newMode = !isDemoMode;
+                localStorage.setItem("kickbox_use_demo", newMode ? "true" : "false");
+                setIsDemoMode(newMode);
+                setRefreshKey(prev => prev + 1);
+              }}
+              style={{
+                background: isDemoMode ? "var(--warning-amber)" : "rgba(255,255,255,0.06)",
+                color: isDemoMode ? "#1a1a1a" : "var(--text-primary)",
+                border: "none",
+                borderRadius: "20px",
+                padding: "6px 14px",
+                fontSize: "12px",
+                fontWeight: "700",
+                cursor: "pointer",
+                marginRight: "8px",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                transition: "all 0.2s ease"
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>
+                {isDemoMode ? "science" : "database"}
+              </span>
+              <span>{isDemoMode ? "Demo Mode" : "Live DB"}</span>
+            </button>
+            <SupabaseStatus key={refreshKey} />
+            <button
+              onClick={handleGenerateBrackets}
+              className="btn-secondary"
+              style={{ fontSize: '13px' }}
+            >
+              Auto Seed Brackets
             </button>
           </div>
         </header>
 
-        <SupabaseStatus key={refreshKey} />
+        {/* Content Container */}
+        <main className="main-content">
+          {activeTab === "championships" && (
+            <section className="dashboard-columns admin-cols">
+              {/* Form 1: Create Championship */}
+              <div className="admin-card">
+                <h2 className="admin-title">Create Championship</h2>
+                <p className="admin-subtitle">Add a new tournament schedule to the platform database</p>
+                <form onSubmit={handleCreateChampionship}>
+                  <div className="form-group">
+                    <label className="form-label">Championship Name</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Mumbai Kickboxing Championship 2026"
+                      value={newChampName}
+                      onChange={(e) => setNewChampName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Venue Location</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Talkatora Stadium, Ring A"
+                      value={newChampVenue}
+                      onChange={(e) => setNewChampVenue(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="btn-primary" style={{ marginTop: '8px' }}>
+                    Publish Championship
+                  </button>
+                </form>
 
-        {/* Tab 1: Manage Championships & Categories */}
-        {activeTab === "championships" && (
-          <section className="grid">
-            <article className="panel" style={{ padding: '24px' }}>
-              <h2>Create New Championship</h2>
-              <form onSubmit={handleCreateChampionship} style={{ display: 'grid', gap: '12px', marginTop: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '600' }}>Name</label>
-                  <input
-                    type="text"
-                    placeholder="E.g., Delhi Kickboxing State Championship 2026"
-                    value={newChampName}
-                    onChange={(e) => setNewChampName(e.target.value)}
-                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--line)' }}
-                    required
-                  />
+                {/* Manage Championships List */}
+                <div style={{ marginTop: '32px', borderTop: '1px solid var(--slate-light)', paddingTop: '24px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '700', marginBottom: '16px' }}>Manage Championships</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {championships.length === 0 ? (
+                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>No championships found.</span>
+                    ) : (
+                      championships.map((champ) => (
+                        <div key={champ.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--midnight)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                          <div style={{ minWidth: 0, flex: 1, marginRight: '12px' }}>
+                            <strong style={{ display: 'block', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-primary)' }}>{champ.name}</strong>
+                            <small style={{ display: 'block', fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>{champ.venue}</small>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteChampionship(champ.id)}
+                            className="btn-action-small"
+                            style={{ backgroundColor: 'var(--neo-red)', color: 'white', padding: '4px 8px', fontSize: '11px', flexShrink: 0, borderRadius: '4px', border: 'none', cursor: 'pointer' }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '600' }}>Venue</label>
-                  <input
-                    type="text"
-                    placeholder="E.g., Talkatora Stadium, Ring B"
-                    value={newChampVenue}
-                    onChange={(e) => setNewChampVenue(e.target.value)}
-                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--line)' }}
-                    required
-                  />
-                </div>
-                <button type="submit" className="dark" style={{ marginTop: '8px' }}>Create Tournament</button>
-              </form>
-            </article>
+              </div>
 
-            <article className="panel" style={{ padding: '24px' }}>
-              <h2>Configure Tournament Categories</h2>
-              <div style={{ marginTop: '16px', display: 'grid', gap: '24px' }}>
-                {/* Select Champ */}
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '600' }}>Target Tournament</label>
+              {/* Form 2: Configure categories */}
+              <div className="admin-card">
+                <h2 className="admin-title">Configure Divisions</h2>
+                <p className="admin-subtitle">Manage tournament divisions & weight bracket definitions</p>
+                
+                <div className="form-group">
+                  <label className="form-label">Select Championship</label>
                   <select
+                    className="form-input"
                     value={selectedChampId}
                     onChange={(e) => setSelectedChampId(e.target.value)}
-                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--line)' }}
                   >
                     {championships.map((champ) => (
                       <option key={champ.id} value={champ.id}>{champ.name}</option>
@@ -585,53 +1592,56 @@ export default function AdminPage() {
                   </select>
                 </div>
 
-                {/* Create Age Category */}
-                <form onSubmit={handleCreateAgeCategory} style={{ borderTop: '1px solid var(--line)', paddingTop: '16px' }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>Add Age Division</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '10px' }}>
+                {/* Sub-form 1: Age Category */}
+                <form onSubmit={handleCreateAgeCategory} style={{ borderTop: '1px solid var(--slate-light)', paddingTop: '16px', marginTop: '16px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '700', marginBottom: '12px' }}>Add Age Division</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
                     <input
                       type="text"
-                      placeholder="Junior, Youth, Senior"
+                      className="form-input"
+                      placeholder="Division Name (e.g. Juniors)"
                       value={newAgeName}
                       onChange={(e) => setNewAgeName(e.target.value)}
-                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--line)' }}
                       required
                     />
                     <input
                       type="number"
+                      className="form-input"
                       placeholder="Min Age"
                       value={minAge}
                       onChange={(e) => setMinAge(Number(e.target.value))}
-                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--line)' }}
                       required
                     />
                     <input
                       type="number"
+                      className="form-input"
                       placeholder="Max Age"
                       value={maxAge}
                       onChange={(e) => setMaxAge(Number(e.target.value))}
-                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--line)' }}
+                      required
                     />
                   </div>
-                  <button type="submit" style={{ marginTop: '10px', fontSize: '12px' }}>Add Age Division</button>
+                  <button type="submit" className="btn-secondary" style={{ width: '100%', padding: '10px', fontSize: '13px' }}>
+                    Add Age Division
+                  </button>
                 </form>
 
-                {/* Create Weight Category */}
-                <form onSubmit={handleCreateWeightCategory} style={{ borderTop: '1px solid var(--line)', paddingTop: '16px' }}>
-                  <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>Add Weight Bracket</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: '10px' }}>
+                {/* Sub-form 2: Weight Category */}
+                <form onSubmit={handleCreateWeightCategory} style={{ borderTop: '1px solid var(--slate-light)', paddingTop: '16px', marginTop: '20px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '700', marginBottom: '12px' }}>Add Weight Bracket</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
                     <input
                       type="text"
-                      placeholder="e.g. 50-55 KG"
+                      className="form-input"
+                      placeholder="e.g. 50-55kg"
                       value={newWeightName}
                       onChange={(e) => setNewWeightName(e.target.value)}
-                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--line)' }}
                       required
                     />
                     <select
+                      className="form-input"
                       value={weightGender}
                       onChange={(e) => setWeightGender(e.target.value)}
-                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--line)' }}
                     >
                       <option value="male">Male</option>
                       <option value="female">Female</option>
@@ -639,175 +1649,550 @@ export default function AdminPage() {
                     </select>
                     <input
                       type="number"
+                      className="form-input"
                       placeholder="Min kg"
                       value={minWeight}
                       onChange={(e) => setMinWeight(Number(e.target.value))}
-                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--line)' }}
                       required
                     />
                     <input
                       type="number"
+                      className="form-input"
                       placeholder="Max kg"
                       value={maxWeight}
                       onChange={(e) => setMaxWeight(Number(e.target.value))}
-                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid var(--line)' }}
                       required
                     />
                   </div>
-                  <button type="submit" style={{ marginTop: '10px', fontSize: '12px' }}>Add Weight Bracket</button>
+                  <button type="submit" className="btn-secondary" style={{ width: '100%', padding: '10px', fontSize: '13px' }}>
+                    Add Weight Bracket
+                  </button>
                 </form>
               </div>
-            </article>
-          </section>
-        )}
+            </section>
+          )}
 
-        {/* Tab 2: Fighter Approvals Registry */}
-        {activeTab === "registrations" && (
-          <section className="grid">
-            <article className="panel wide" style={{ padding: '24px' }}>
-              <h2>Fighter Registration Desk</h2>
-              <p style={{ color: 'var(--muted)', fontSize: '14px', marginBottom: '16px' }}>
-                Approve registrations to make them available for tournament bracket seeding.
-              </p>
-
-              <div className="table" style={{ display: 'grid', gap: '10px' }}>
-                {registrations.length === 0 ? (
-                  <div style={{ padding: '30px', textAlign: 'center', color: 'var(--muted)' }}>
-                    No fighter registrations in database.
-                  </div>
-                ) : (
-                  registrations.map((reg) => (
-                    <div
-                      key={reg.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '14px 16px',
-                        border: '1px solid var(--line)',
-                        borderRadius: '8px',
-                        background: 'var(--panel)'
-                      }}
+          {activeTab === "registrations" && (
+            <section style={{ minWidth: 0 }}>
+              <div className="column-title-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
+                <div>
+                  <h2 className="column-title">Fighter Registration Desk</h2>
+                  <p className="column-subtitle">Review, approve, or reject pending tournament registrations</p>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={handleLoadTestCohort}
+                    className="btn-secondary"
+                    style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', borderColor: 'var(--success-green)', color: 'var(--success-green)', background: 'rgba(52,199,89,0.05)' }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>group_add</span>
+                    Load Test Cohort (10+ Fighters)
+                  </button>
+                  <button
+                    onClick={handleLoadSampleFighters}
+                    className="btn-secondary"
+                    style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px' }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
+                    Load 100 Fighters Sample
+                  </button>
+                  {isDemoMode && (
+                    <button
+                      onClick={handleClearLocalData}
+                      className="btn-action-small"
+                      style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', backgroundColor: 'var(--neo-red)', border: 'none', color: 'white' }}
                     >
-                      <div>
-                        <strong style={{ fontSize: '16px', display: 'block' }}>
-                          {getFighterName(reg.profiles)}
-                        </strong>
-                        <small style={{ color: 'var(--muted)', display: 'block', marginTop: '2px' }}>
-                          Division: {getCategoryName(reg.age_categories)} | Bracket: {getCategoryName(reg.weight_categories)} | Weight: {reg.weight_kg}kg ({reg.gender})
-                        </small>
-                      </div>
+                      <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete_forever</span>
+                      Reset Local Data
+                    </button>
+                  )}
+                </div>
+              </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <span className={`badge ${reg.status === 'pending' ? 'pending' : reg.status === 'rejected' ? 'review' : 'approved'}`}>
-                          {reg.status}
+              <div className="approvals-panel" style={{ width: '100%' }}>
+
+                {/* ── XLSX Upload Panel ────────────────────────────────────── */}
+                <div style={{ background: 'var(--slate)', borderRadius: '12px', padding: '20px 24px', marginBottom: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <h3 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)' }}>Upload Fighter Excel (XLSX)</h3>
+                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px' }}>Columns: Name, Age, Gender, Weight (kg), Club, Coach — categories auto-assigned by WAK-1F rules</p>
+                    </div>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--neo-red)', color: 'white', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.04em' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
+                      Choose .xlsx / .xls
+                      <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleXLSXFileChange} />
+                    </label>
+                  </div>
+
+                  {xlsxPreview.length > 0 && (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                          📄 <strong style={{ color: 'var(--text-primary)' }}>{xlsxFileName}</strong> — {xlsxPreview.length} fighters parsed
                         </span>
-
-                        {reg.status !== "approved" && (
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateRegStatus(reg.id, "approved")}
-                            style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--green)', color: '#fff', border: 'none' }}
-                          >
-                            Approve
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button onClick={() => { setXlsxPreview([]); setXlsxFileName(""); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                            Discard
                           </button>
-                        )}
-                        {reg.status !== "rejected" && (
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateRegStatus(reg.id, "rejected")}
-                            style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--brand)', color: '#fff', border: 'none' }}
-                          >
-                            Reject
+                          <button onClick={handleXLSXImport} disabled={xlsxImporting || !selectedChampId} style={{ background: 'var(--success-green)', color: 'white', border: 'none', padding: '6px 18px', borderRadius: '6px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', opacity: xlsxImporting ? 0.6 : 1 }}>
+                            {xlsxImporting ? "Importing…" : `✓ Import ${xlsxPreview.length} Fighters`}
                           </button>
-                        )}
+                        </div>
+                      </div>
+                      <div style={{ overflowX: 'auto', maxHeight: '240px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--midnight)', position: 'sticky', top: 0 }}>
+                              {['#','Name','Age','Gender','Weight (kg)','Club','Auto Category'].map(h => (
+                                <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: '700', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {xlsxPreview.slice(0, 50).map((f, i) => {
+                              const cls = classifyFighterLocal({ fighter_id: String(i), full_name: f.name, age: f.age, gender: f.gender, weight_kg: f.weight });
+                              return (
+                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <td style={{ padding: '7px 12px', color: 'var(--text-secondary)' }}>{i + 1}</td>
+                                  <td style={{ padding: '7px 12px', fontWeight: '600', color: 'var(--text-primary)' }}>{f.name}</td>
+                                  <td style={{ padding: '7px 12px', color: 'var(--text-primary)' }}>{f.age}</td>
+                                  <td style={{ padding: '7px 12px' }}>
+                                    <span style={{ background: f.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)', color: f.gender === 'Male' ? '#60a5fa' : '#f472b6', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700' }}>{f.gender}</span>
+                                  </td>
+                                  <td style={{ padding: '7px 12px', color: 'var(--text-primary)' }}>{f.weight} kg</td>
+                                  <td style={{ padding: '7px 12px', color: 'var(--text-secondary)' }}>{f.club || '—'}</td>
+                                  <td style={{ padding: '7px 12px' }}>
+                                    <span style={{ background: 'rgba(255,149,0,0.15)', color: 'var(--warning-amber)', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                                      {cls.age_category} · {cls.weight_category} · {cls.gender}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {xlsxPreview.length > 50 && (
+                              <tr><td colSpan={7} style={{ padding: '8px 12px', color: 'var(--text-secondary)', fontSize: '12px', textAlign: 'center' }}>…and {xlsxPreview.length - 50} more rows</td></tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
-            </article>
-          </section>
-        )}
-
-        {/* Tab 3: Matches & Winner Recording */}
-        {activeTab === "matches" && (
-          <section className="grid">
-            <article className="panel wide" style={{ padding: '24px' }}>
-              <h2>Ringside Scorekeeper Desk</h2>
-              <p style={{ color: 'var(--muted)', fontSize: '14px', marginBottom: '16px' }}>
-                Select winners for live/scheduled matches. Recording a winner automatically changes the match status to Completed.
-              </p>
-
-              <div style={{ display: 'grid', gap: '12px' }}>
-                {matches.length === 0 ? (
-                  <div style={{ padding: '30px', textAlign: 'center', color: 'var(--muted)' }}>
-                    No matches generated yet. Set up tournament groups, approve fighters, and click "Auto Generate Brackets"!
-                  </div>
-                ) : (
-                  matches.map((match) => {
-                    const fighterAName = getFighterName(match.fighter_a);
-                    const fighterBName = getFighterName(match.fighter_b);
-                    const winnerName = match.winner_id === match.fighter_a_id ? fighterAName : fighterBName;
-
-                    return (
-                      <div
-                        key={match.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '16px',
-                          border: '1px solid var(--line)',
-                          borderRadius: '8px',
-                          background: 'var(--panel)'
-                        }}
-                      >
-                        <div>
-                          <span style={{ fontSize: '12px', color: 'var(--brand)', fontWeight: '800', textTransform: 'uppercase' }}>
-                            {match.round_name} - {match.ring_number}
-                          </span>
-                          <strong style={{ display: 'block', fontSize: '18px', margin: '4px 0' }}>
-                            {fighterAName} <span style={{ color: 'var(--muted)', fontWeight: '400' }}>vs</span> {fighterBName}
-                          </strong>
-                          {match.status === "completed" ? (
-                            <small style={{ color: 'var(--green)', fontWeight: '600' }}>
-                              ✓ Completed - Winner: {winnerName}
+                  )}
+                </div>
+                {/* ─────────────────────────────────────────────────────────── */}
+                <div className="approvals-list">
+                  {registrations.length === 0 ? (
+                    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                      No fighter registrations found in the database.
+                    </div>
+                  ) : (
+                    registrations.map((reg) => (
+                      <div className="approval-item" key={reg.id} style={{ padding: '20px 24px' }}>
+                        <div className="approval-fighter-details">
+                          <div className="approval-avatar" style={{ width: '56px', height: '56px' }}>
+                            <img src={getFighterAvatar(reg.profiles?.id)} alt={getFighterName(reg.profiles)} />
+                          </div>
+                          <div>
+                            <strong style={{ display: 'block', fontSize: '16px' }}>
+                              {getFighterName(reg.profiles)}
+                            </strong>
+                            <small style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                              Division: {getCategoryName(reg.age_categories)} | Weight: {reg.weight_kg}kg ({reg.gender}) | Bracket: {getCategoryName(reg.weight_categories)}
                             </small>
-                          ) : (
-                            <small style={{ color: 'var(--gold)', fontWeight: '600' }}>
-                              ⏰ Scheduled
-                            </small>
-                          )}
+                          </div>
                         </div>
 
-                        {match.status !== "completed" && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                          <span className={`status-badge ${reg.status}`} style={{ fontSize: '11px', padding: '6px 14px' }}>
+                            {reg.status}
+                          </span>
+
                           <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleRecordWinner(match.id, match.fighter_a_id)}
-                              style={{ padding: '6px 10px', fontSize: '12px' }}
-                            >
-                              {fighterAName} Wins
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRecordWinner(match.id, match.fighter_b_id)}
-                              style={{ padding: '6px 10px', fontSize: '12px' }}
-                            >
-                              {fighterBName} Wins
-                            </button>
+                            {reg.status !== "approved" && (
+                              <button
+                                onClick={() => handleUpdateRegStatus(reg.id, "approved")}
+                                className="btn-action-small"
+                                style={{ backgroundColor: 'var(--success-green)' }}
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {reg.status !== "rejected" && (
+                              <button
+                                onClick={() => handleUpdateRegStatus(reg.id, "rejected")}
+                                className="btn-action-small"
+                                style={{ backgroundColor: 'var(--neo-red)' }}
+                              >
+                                Reject
+                              </button>
+                            )}
                           </div>
-                        )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeTab === "matches" && (
+            <section style={{ minWidth: 0 }}>
+              <div className="column-title-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
+                <div>
+                  <h2 className="column-title">Ringside Scorekeeper Desk</h2>
+                  <p className="column-subtitle">Control and record outcomes for scheduled bracket matches</p>
+                </div>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {matches.length > 0 && (
+                    <select
+                      value={selectedMatchCategory}
+                      onChange={(e) => setSelectedMatchCategory(e.target.value)}
+                      className="form-input"
+                      style={{ width: 'auto', minWidth: '220px', padding: '8px 12px', fontSize: '13px', backgroundColor: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.12)', color: 'var(--text-primary)' }}
+                    >
+                      <option value="all">All Categories</option>
+                      {Array.from(new Set(matches.map(m => m.ring_number?.split(" | CATEGORY:")[1]).filter(Boolean))).map(catKey => (
+                        <option key={catKey} value={catKey}>
+                          {formatDivisionKey(catKey)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    onClick={handleDownloadPDF}
+                    className="btn-primary"
+                    style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px' }}
+                    disabled={matches.length === 0}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>picture_as_pdf</span>
+                    Download Match Schedule PDF
+                  </button>
+                </div>
+              </div>
+
+              <div className="schedule-list">
+                {matches.length === 0 ? (
+                  <div style={{ padding: '40px', textAlign: 'center', background: 'var(--slate)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
+                    No matches generated. Set up tournament divisions, approve fighters, and click "Auto Seed Brackets"!
+                  </div>
+                ) : (() => {
+                  // Group matches by category key (from ring_number CATEGORY: tag)
+                  const catGroups: { [key: string]: typeof matches } = {};
+                  matches.forEach(m => {
+                    const catKey = m.ring_number?.split(" | CATEGORY:")[1] || "General";
+                    if (!catGroups[catKey]) catGroups[catKey] = [];
+                    catGroups[catKey].push(m);
+                  });
+
+                  // Helper to get fighter name or waiting/feeder match label
+                  function getFighterLabel(m: Match, side: 'a' | 'b') {
+                    const id = side === 'a' ? m.fighter_a_id : m.fighter_b_id;
+                    const profile = side === 'a' ? m.fighter_a : m.fighter_b;
+                    if (id) {
+                      return profile?.full_name || "Unknown Fighter";
+                    }
+
+                    // No fighter assigned yet. Let's find feeder match info
+                    const categoryPart = m.ring_number?.split(" | CATEGORY:")[1] || "";
+                    if (!categoryPart) return "TBD";
+                    
+                    const siblingMatches = matches
+                      .filter((sm: any) => sm.championship_id === m.championship_id && (sm.ring_number?.split(" | CATEGORY:")[1] || "") === categoryPart)
+                      .sort((x, y) => x.match_number - y.match_number);
+
+                    const currentIndex = siblingMatches.findIndex((sm: any) => sm.id === m.id);
+                    if (currentIndex === -1) return "TBD";
+
+                    // Rebuild round sizes/starts
+                    const totalMatches = siblingMatches.length;
+                    const frs = Math.round((totalMatches + 1) / 2);
+                    const roundSizes: number[] = [];
+                    let sz = frs;
+                    while (sz >= 1) { roundSizes.push(sz); sz = Math.floor(sz / 2); }
+                    
+                    const roundStarts: number[] = [];
+                    let acc = 0;
+                    for (const s of roundSizes) { roundStarts.push(acc); acc += s; }
+
+                    // Find round index of currentIndex
+                    let roundIdx = -1;
+                    for (let r = 0; r < roundSizes.length; r++) {
+                      if (currentIndex >= roundStarts[r] && currentIndex < roundStarts[r] + roundSizes[r]) {
+                        roundIdx = r;
+                        break;
+                      }
+                    }
+
+                    // First round with no fighter_id is a Bye/TBD
+                    if (roundIdx <= 0) return "TBD (Bye)";
+
+                    // Subsequent rounds have feeder matches in the previous round
+                    const offset = currentIndex - roundStarts[roundIdx];
+                    const feederIdx = roundStarts[roundIdx - 1] + offset * 2 + (side === 'a' ? 0 : 1);
+                    if (feederIdx < siblingMatches.length) {
+                      const feeder = siblingMatches[feederIdx];
+                      let roundShort = feeder.round_name;
+                      if (feeder.round_name === "Quarter Final") roundShort = "QF";
+                      else if (feeder.round_name === "Semi Final") roundShort = "SF";
+                      else if (feeder.round_name === "Final") roundShort = "Final";
+                      return `Waiting for ${roundShort} Match #${feeder.match_number}`;
+                    }
+                    return "TBD";
+                  }
+
+                  // Helper to get advanced round description
+                  function getAdvanceRoundText(matchId: string) {
+                    const currentMatchIndex = matches.findIndex(m => m.id === matchId);
+                    if (currentMatchIndex === -1) return "Advanced";
+                    const currentMatch = matches[currentMatchIndex];
+                    
+                    const categoryPart = currentMatch.ring_number?.split(" | CATEGORY:")[1] || "";
+                    const siblingMatches = matches
+                      .filter((sm: any) => sm.championship_id === currentMatch.championship_id && (sm.ring_number?.split(" | CATEGORY:")[1] || "") === categoryPart)
+                      .sort((x, y) => x.match_number - y.match_number);
+                      
+                    const currentIndex = siblingMatches.findIndex((sm: any) => sm.id === matchId);
+                    if (currentIndex === -1) return "Advanced";
+                    
+                    const totalMatches = siblingMatches.length;
+                    const frs = Math.round((totalMatches + 1) / 2);
+                    const roundSizes: number[] = [];
+                    let sz = frs;
+                    while (sz >= 1) { roundSizes.push(sz); sz = Math.floor(sz / 2); }
+                    
+                    const roundStarts: number[] = [];
+                    let acc = 0;
+                    for (const s of roundSizes) { roundStarts.push(acc); acc += s; }
+                    
+                    let roundIdx = -1;
+                    for (let r = 0; r < roundSizes.length; r++) {
+                      if (currentIndex >= roundStarts[r] && currentIndex < roundStarts[r] + roundSizes[r]) {
+                        roundIdx = r;
+                        break;
+                      }
+                    }
+                    
+                    if (roundIdx !== -1 && roundIdx + 1 < roundSizes.length) {
+                      const offset = currentIndex - roundStarts[roundIdx];
+                      const nextSiblingIdx = roundStarts[roundIdx + 1] + Math.floor(offset / 2);
+                      if (nextSiblingIdx < siblingMatches.length) {
+                        const nextMatch = siblingMatches[nextSiblingIdx];
+                        return `Advanced to ${nextMatch.round_name}`;
+                      }
+                    }
+                    return "Champion! 🏆";
+                  }
+
+                  // Progress bar helper for visual state
+                  function renderCategoryProgressBar(catMatchesList: typeof matches) {
+                    const roundMap: Record<string, { total: number; done: number }> = {};
+                    const roundNamesOrder = ["Round 1", "Round 2", "Round 3", "Round 4", "Quarter Final", "Semi Final", "Final"];
+                    
+                    catMatchesList.forEach(m => {
+                      if (!roundMap[m.round_name]) {
+                        roundMap[m.round_name] = { total: 0, done: 0 };
+                      }
+                      roundMap[m.round_name].total += 1;
+                      if (m.status === "completed") {
+                        roundMap[m.round_name].done += 1;
+                      }
+                    });
+
+                    const presentRounds = Object.keys(roundMap).sort((a, b) => {
+                      return (roundNamesOrder.indexOf(a) ?? 99) - (roundNamesOrder.indexOf(b) ?? 99);
+                    });
+
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: '11px' }}>
+                        {presentRounds.map((rName, idx) => {
+                          const { total, done } = roundMap[rName];
+                          const dots = [];
+                          for (let i = 0; i < total; i++) {
+                            dots.push(i < done ? "●" : "○");
+                          }
+                          let shortName = rName;
+                          if (rName === "Quarter Final") shortName = "QF";
+                          else if (rName === "Semi Final") shortName = "SF";
+                          else if (rName === "Final") shortName = "Final";
+                          else if (rName.startsWith("Round ")) shortName = "R" + rName.split(" ")[1];
+
+                          return (
+                            <span key={rName} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>{shortName}</span>
+                              <span style={{ letterSpacing: '1.5px', color: 'var(--warning-amber)', fontSize: '12px' }}>{dots.join("")}</span>
+                              {idx < presentRounds.length - 1 && <span style={{ color: 'rgba(255,255,255,0.15)', margin: '0 4px' }}>→</span>}
+                            </span>
+                          );
+                        })}
                       </div>
                     );
-                  })
-                )}
+                  }
+
+                  // Round order for sorting
+                  const ROUND_ORDER: Record<string, number> = {
+                    "Round 1": 1, "Round 2": 2, "Round 3": 3, "Round 4": 4,
+                    "Quarter Final": 5, "Semi Final": 6, "Final": 7
+                  };
+
+                  const filteredGroups = Object.entries(catGroups).filter(([catKey]) => {
+                    if (selectedMatchCategory === "all") return true;
+                    return catKey === selectedMatchCategory;
+                  });
+
+                  return filteredGroups.map(([catKey, catMatches]) => {
+                    const sortedMatches = [...catMatches].sort((a, b) =>
+                      (ROUND_ORDER[a.round_name] ?? 99) - (ROUND_ORDER[b.round_name] ?? 99) ||
+                      a.match_number - b.match_number
+                    );
+                    const doneCount = catMatches.filter(m => m.status === "completed").length;
+                    const totalCount = catMatches.length;
+                    const allDone = doneCount === totalCount;
+
+                    return (
+                      <div key={catKey} style={{ marginBottom: '24px', background: 'var(--slate)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' }}>
+                        {/* Category Header */}
+                        <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--midnight)', padding: '16px 20px', borderBottom: '2px solid var(--neo-red)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'var(--neo-red)' }}>military_tech</span>
+                              <div>
+                                <div style={{ fontSize: '14px', fontWeight: '800', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-primary)' }}>
+                                  {formatDivisionKey(catKey)}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                  {totalCount} matches · {catMatches.filter(m => m.fighter_a_id || m.fighter_b_id).length} active fighter slots
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{ fontSize: '12px', color: allDone ? 'var(--success-green)' : 'var(--warning-amber)', fontWeight: '700' }}>
+                                {doneCount}/{totalCount} done
+                              </div>
+                              <div style={{ width: '80px', height: '6px', borderRadius: '3px', background: 'rgba(255,255,255,0.1)' }}>
+                                <div style={{ width: `${(doneCount / totalCount) * 100}%`, height: '100%', borderRadius: '3px', background: allDone ? 'var(--success-green)' : 'var(--neo-red)', transition: 'width 0.3s' }} />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Visual Progress Bar */}
+                          {renderCategoryProgressBar(catMatches)}
+                        </div>
+
+                        {/* Matches in this category */}
+                        {sortedMatches.map((match) => {
+                          const fighterAName = getFighterLabel(match, 'a');
+                          const fighterBName = getFighterLabel(match, 'b');
+                          const winnerName = match.winner_id === match.fighter_a_id ? fighterAName : fighterBName;
+                          const isCompleted = match.status === "completed";
+                          const ringLabel = match.ring_number?.split(" | CATEGORY:")[0] || "Ring 1";
+
+                          return (
+                            <div className="match-row" key={match.id} style={{ padding: '18px 20px', borderRadius: 0, borderBottom: '1px solid rgba(255,255,255,0.03)', borderLeft: `3px solid ${isCompleted ? 'var(--success-green)' : 'transparent'}` }}>
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginRight: '16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', fontWeight: 'bold' }}>
+                                #{match.match_number}
+                              </div>
+                              
+                              <div className="fighter-pairing" style={{ flex: 1.5 }}>
+                                <div className="fighter-details">
+                                  <div className="fighter-pic">
+                                    <img src={getFighterAvatar(match.fighter_a_id || undefined)} alt={fighterAName} />
+                                  </div>
+                                  <div className="fighter-info">
+                                    <strong style={{ color: match.winner_id === match.fighter_a_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterAName}</strong>
+                                    <small>{getFighterRegistrationDetails(match.fighter_a_id || undefined) || ""}</small>
+                                  </div>
+                                </div>
+                                <div className="vs-divider">VS</div>
+                                <div className="fighter-details right">
+                                  <div className="fighter-pic">
+                                    <img src={getFighterAvatar(match.fighter_b_id || undefined)} alt={fighterBName} />
+                                  </div>
+                                  <div className="fighter-info">
+                                    <strong style={{ color: match.winner_id === match.fighter_b_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterBName}</strong>
+                                    <small>{getFighterRegistrationDetails(match.fighter_b_id || undefined) || ""}</small>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="ring-round-info" style={{ flex: 1.2, borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '20px' }}>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <span className="ring-label">{ringLabel}</span>
+                                  <span className="round-label" style={{ background: match.round_name === "Final" ? 'rgba(255,149,0,0.15)' : match.round_name === "Semi Final" ? 'rgba(255,59,48,0.1)' : 'rgba(255,255,255,0.05)', color: match.round_name === "Final" ? 'var(--warning-amber)' : match.round_name === "Semi Final" ? 'var(--neo-red)' : 'var(--text-secondary)' }}>
+                                    {match.round_name}
+                                  </span>
+                                </div>
+                                {isCompleted ? (
+                                  <span style={{ fontSize: '12px', color: 'var(--success-green)', fontWeight: '700', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>emoji_events</span>
+                                    {winnerName} → {getAdvanceRoundText(match.id)}
+                                  </span>
+                                ) : (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+                                    <button
+                                      onClick={() => handleRecordWinner(match.id, match.fighter_a_id)}
+                                      disabled={!match.fighter_a_id || !match.fighter_b_id}
+                                      style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
+                                    >
+                                      ✓ {fighterAName.startsWith("Waiting") || fighterAName.startsWith("TBD") ? "A" : fighterAName.split(" ")[0]} Wins
+                                    </button>
+                                    <button
+                                      onClick={() => handleRecordWinner(match.id, match.fighter_b_id)}
+                                      disabled={!match.fighter_a_id || !match.fighter_b_id}
+                                      style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
+                                    >
+                                      ✓ {fighterBName.startsWith("Waiting") || fighterBName.startsWith("TBD") ? "B" : fighterBName.split(" ")[0]} Wins
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
-            </article>
-          </section>
-        )}
-      </section>
-    </main>
+            </section>
+          )}
+        </main>
+      </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <nav className="mobile-bottom-nav" aria-label="Mobile Bottom Tabs">
+        <button
+          className={`bottom-nav-btn ${activeTab === "championships" ? "active" : ""}`}
+          onClick={() => setActiveTab("championships")}
+        >
+          <span className="material-symbols-outlined">emoji_events</span>
+          <span className="tab-label">Config</span>
+        </button>
+
+        <button
+          className={`bottom-nav-btn ${activeTab === "registrations" ? "active" : ""}`}
+          onClick={() => setActiveTab("registrations")}
+        >
+          <span className="material-symbols-outlined">verified_user</span>
+          <span className="tab-label">Fighters</span>
+        </button>
+
+        <button
+          className={`bottom-nav-btn ${activeTab === "matches" ? "active" : ""}`}
+          onClick={() => setActiveTab("matches")}
+        >
+          <span className="material-symbols-outlined">sports_kabaddi</span>
+          <span className="tab-label">Matches</span>
+        </button>
+
+        <button
+          className="bottom-nav-btn"
+          onClick={() => window.location.href = "/"}
+        >
+          <span className="material-symbols-outlined">home</span>
+          <span className="tab-label">Public</span>
+        </button>
+      </nav>
+    </div>
   );
 }
