@@ -1316,7 +1316,7 @@ export default function AdminPage() {
     setXlsxPreview([]);
 
     try {
-      const XLSX = (await import("xlsx")).default;
+      const XLSX = await import("xlsx");
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -1601,34 +1601,6 @@ export default function AdminPage() {
         <header className="top-header">
           <span className="brand-text">Kickbox Admin Desk</span>
           <div className="header-actions">
-            <button
-              onClick={() => {
-                const newMode = !isDemoMode;
-                localStorage.setItem("kickbox_use_demo", newMode ? "true" : "false");
-                setIsDemoMode(newMode);
-                setRefreshKey(prev => prev + 1);
-              }}
-              style={{
-                background: isDemoMode ? "var(--warning-amber)" : "rgba(255,255,255,0.06)",
-                color: isDemoMode ? "#1a1a1a" : "var(--text-primary)",
-                border: "none",
-                borderRadius: "20px",
-                padding: "6px 14px",
-                fontSize: "12px",
-                fontWeight: "700",
-                cursor: "pointer",
-                marginRight: "8px",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                transition: "all 0.2s ease"
-              }}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>
-                {isDemoMode ? "science" : "database"}
-              </span>
-              <span>{isDemoMode ? "Demo Mode" : "Live DB"}</span>
-            </button>
             <SupabaseStatus key={refreshKey} />
             <button
               onClick={handleGenerateBrackets}
@@ -1828,32 +1800,7 @@ export default function AdminPage() {
                   <p className="column-subtitle">Review, approve, or reject pending tournament registrations</p>
                 </div>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                  <button
-                    onClick={handleLoadTestCohort}
-                    className="btn-secondary"
-                    style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', borderColor: 'var(--success-green)', color: 'var(--success-green)', background: 'rgba(52,199,89,0.05)' }}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>group_add</span>
-                    Load Test Cohort (10+ Fighters)
-                  </button>
-                  <button
-                    onClick={handleLoadSampleFighters}
-                    className="btn-secondary"
-                    style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px' }}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>download</span>
-                    Load 100 Fighters Sample
-                  </button>
-                  {isDemoMode && (
-                    <button
-                      onClick={handleClearLocalData}
-                      className="btn-action-small"
-                      style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', backgroundColor: 'var(--neo-red)', border: 'none', color: 'white' }}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>delete_forever</span>
-                      Reset Local Data
-                    </button>
-                  )}
+
                 </div>
               </div>
 
