@@ -1319,35 +1319,96 @@ export default function AdminPage() {
       const XLSX = await import("xlsx");
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      
+      const allNormalised: any[] = [];
 
-      // Normalise column names (case-insensitive, handle variants)
-      const normalised = rows.map((row: any) => {
-        const get = (...keys: string[]) => {
-          for (const k of keys) {
-            const found = Object.keys(row).find(rk => rk.toLowerCase().replace(/[\s_()\-]/g, "") === k.toLowerCase().replace(/[\s_()\-]/g, ""));
-            if (found && row[found] !== "") return row[found];
+      wb.SheetNames.forEach(sheetName => {
+        const ws = wb.Sheets[sheetName];
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+        rows.forEach((row: any) => {
+          const get = (...keys: string[]) => {
+            for (const k of keys) {
+              const cleanKey = k.toLowerCase().replace(/[\s_()\-]/g, "");
+              const found = Object.keys(row).find(rk => {
+                const cleanRk = rk.toLowerCase().replace(/[\s_()\-]/g, "");
+                return cleanRk === cleanKey || cleanRk.includes(cleanKey) || cleanKey.includes(cleanRk);
+              });
+              if (found && row[found] !== null && row[found] !== undefined && String(row[found]).trim() !== "") {
+                return row[found];
+              }
+            }
+            return "";
+          };
+
+          const name = String(get("fullname", "name", "fullName", "fighter_name", "fightername", "fightersname") || "").trim();
+          if (!name || name.toLowerCase() === "name" || name.toLowerCase().includes("fighter id")) {
+            return; // Skip empty rows or header duplicate rows
           }
-          return "";
-        };
-        const name = String(get("fullname", "name", "fullName", "fighter_name") || "").trim();
-        const age = Number(get("age", "Age") || 0);
-        const genderRaw = String(get("gender", "Gender", "sex") || "").trim().toLowerCase();
-        const gender = genderRaw === "m" || genderRaw === "male" ? "Male" : genderRaw === "f" || genderRaw === "female" ? "Female" : "";
-        const weight = Number(get("weight", "weightkg", "weight_kg", "Weight") || 0);
-        const club = String(get("club", "gym", "gymclub", "club_name") || "").trim();
-        const coach = String(get("coach", "coach_name") || "").trim();
-        return { name, age, gender, weight, club, coach };
-      }).filter(r => r.name && r.age > 0 && r.weight > 0 && r.gender);
 
-      setXlsxPreview(normalised.slice(0, 200)); // cap preview at 200 rows
+          // Parse age category or age group (e.g. "9-10", "19+")
+          const ageVal = get("agegroup", "age_group", "age group", "agecategory", "age_category", "age category", "age", "group");
+          let age = 0;
+          const ageStr = String(ageVal || sheetName || "").trim().toLowerCase();
+          
+          if (ageStr.includes("19") || ageStr.includes("sr") || ageStr.includes("senior")) {
+            age = 19;
+          } else if (ageStr.includes("17") || ageStr.includes("18")) {
+            age = 17;
+          } else if (ageStr.includes("15") || ageStr.includes("16")) {
+            age = 15;
+          } else if (ageStr.includes("13") || ageStr.includes("14")) {
+            age = 13;
+          } else if (ageStr.includes("11") || ageStr.includes("12")) {
+            age = 11;
+          } else if (ageStr.includes("9") || ageStr.includes("10")) {
+            age = 9;
+          } else {
+            const parsed = parseInt(ageStr.replace(/[^0-9]/g, ""));
+            age = isNaN(parsed) ? 19 : parsed;
+          }
+
+          // Parse weight category or weight (e.g. "48", "51 kg")
+          const weightVal = get("weightcategory", "weight_category", "weight category", "weightkg", "weight_kg", "weight kg", "weight", "wt");
+          let weight = 0;
+          if (weightVal !== "") {
+            const cleanWeightStr = String(weightVal).replace(/[^0-9.]/g, "");
+            weight = parseFloat(cleanWeightStr);
+          }
+          if (isNaN(weight) || weight <= 0) {
+            weight = 48; // fallback default
+          }
+
+          // Parse gender (Male/Female)
+          const genderVal = get("gender", "sex");
+          let gender = "Male"; // Default to Male if column not found
+          if (genderVal) {
+            const gStr = String(genderVal).trim().toLowerCase();
+            if (gStr === "f" || gStr === "female" || gStr.includes("girl") || gStr.includes("women") || gStr.includes("female")) {
+              gender = "Female";
+            }
+          }
+
+          // Parse state or club
+          const club = String(get("club", "gym", "state", "clubname", "club_name", "gymclub") || "Kerala").trim();
+          const coach = String(get("coach", "coach_name", "coachname") || "Self").trim();
+
+          allNormalised.push({ name, age, gender, weight, club, coach });
+        });
+      });
+
+      if (allNormalised.length === 0) {
+        alert("⚠️ No fighters parsed. Please check that your sheets have columns like 'Name' and 'Weight Category'.");
+      } else {
+        setXlsxPreview(allNormalised.slice(0, 500)); // Cap preview at 500
+      }
     } catch (err: any) {
       alert("Error reading Excel file: " + err.message);
     }
-    // Reset file input so same file can be re-selected
+    
     e.target.value = "";
   }
+
 
   async function handleXLSXImport() {
     if (!xlsxPreview.length || !selectedChampId) return;
