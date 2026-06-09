@@ -947,6 +947,44 @@ export default function AdminPage() {
     }
   }
 
+  // Clear ALL data from Supabase (for fresh start)
+  async function handleClearAllData() {
+    if (!confirm("⚠️ WARNING: This will permanently delete ALL data from ALL tables (matches, registrations, categories, championships). Are you sure?")) return;
+    if (!confirm("This action CANNOT be undone. Type OK to confirm you want to delete everything.")) return;
+
+    try {
+      setLoading(true);
+
+      if (isDemoMode) {
+        localStorage.removeItem("kickbox_championships");
+        localStorage.removeItem("kickbox_registrations");
+        localStorage.removeItem("kickbox_matches");
+        localStorage.removeItem("kickbox_profiles");
+        alert("✅ All demo data cleared!");
+        setRefreshKey((prev) => prev + 1);
+        return;
+      }
+
+      const res = await fetch("/api/clear-all-data", { method: "POST" });
+      const data = await res.json();
+
+      if (data.success) {
+        const summary = data.results
+          .map((r: any) => `${r.table}: ${r.count ?? 0} rows deleted`)
+          .join("\n");
+        alert("✅ All data cleared successfully!\n\n" + summary);
+        setSelectedChampId("");
+        setRefreshKey((prev) => prev + 1);
+      } else {
+        alert("Error clearing data: " + (data.error || "Unknown error"));
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Load Test Cohort (10+ Fighters for Age 9-10)
   async function handleLoadTestCohort() {
     try {
@@ -1598,6 +1636,25 @@ export default function AdminPage() {
               style={{ fontSize: '13px' }}
             >
               Auto Seed Brackets
+            </button>
+            <button
+              onClick={handleClearAllData}
+              style={{
+                fontSize: '13px',
+                background: 'rgba(255,59,48,0.12)',
+                color: 'var(--neo-red)',
+                border: '1px solid rgba(255,59,48,0.3)',
+                borderRadius: '8px',
+                padding: '8px 14px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>delete_forever</span>
+              Clear All Data
             </button>
           </div>
         </header>

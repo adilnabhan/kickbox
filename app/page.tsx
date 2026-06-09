@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { SupabaseStatus } from "@/components/SupabaseStatus";
 
 type Championship = {
   id: string;
@@ -198,8 +197,6 @@ export default function Home() {
             <button className="dark" type="button" onClick={handleGenerateBrackets}>Generate Brackets</button>
           </div>
         </header>
-
-        <SupabaseStatus key={refreshKey} />
 
         <section className="stats" id="dashboard" aria-label="Championship statistics">
           <article>
