@@ -58,6 +58,30 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<"championships" | "registrations" | "matches">("championships");
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [selectedMatchCategory, setSelectedMatchCategory] = useState<string>("all");
+  const [selectedMatchAge, setSelectedMatchAge] = useState<string>("all");
+  const [selectedMatchGender, setSelectedMatchGender] = useState<string>("all");
+  const [selectedMatchWeight, setSelectedMatchWeight] = useState<string>("all");
+  const [matchViewMode, setMatchViewMode] = useState<"list" | "bracket">("bracket");
+
+  // Helper to dynamically resolve readable labels for category keys
+  function getDivisionLabel(catKey: string): string {
+    if (!catKey) return "General";
+    
+    // Find registration with this category key
+    const reg = registrations.find(r => 
+      `${r.age_category_id}-${r.weight_category_id}-${r.gender.toLowerCase()}` === catKey.toLowerCase()
+    );
+    
+    if (reg) {
+      const ageLabel = reg.age_categories?.name || reg.age_category_id;
+      const weightLabel = reg.weight_categories?.name || reg.weight_category_id;
+      const genderLabel = reg.gender.toLowerCase() === "male" || reg.gender.toLowerCase() === "m" ? "Male" : "Female";
+      return `${genderLabel.toUpperCase()} · ${ageLabel.toUpperCase()} · ${weightLabel.toUpperCase()}`;
+    }
+    
+    // Fallback if not found or formatted differently
+    return formatDivisionKey(catKey);
+  }
 
   // Database Data States
   const [championships, setChampionships] = useState<Championship[]>([]);
@@ -571,29 +595,65 @@ export default function AdminPage() {
           }
         }
 
-        // ── Seed fighters into round 1 slots ─────────────────────────────
-        for (let i = 0; i < numFighters; i++) {
-          const matchIdx = Math.floor(i / 2);
-          if (i % 2 === 0) {
-            groupMatches[matchIdx].fighter_a_id = groupFighters[i].fighter_id;
-          } else {
-            groupMatches[matchIdx].fighter_b_id = groupFighters[i].fighter_id;
+        // ── Seed fighters into round 1 slots using standard tournament seeding ──
+        const getSeedingOrder = (p: number): number[] => {
+          let order = [1, 2];
+          while (order.length < p) {
+            const nextOrder: number[] = [];
+            const target = order.length * 2 + 1;
+            for (const x of order) {
+              nextOrder.push(x);
+              nextOrder.push(target - x);
+            }
+            order = nextOrder;
+          }
+          return order;
+        };
+
+        const seedingOrder = getSeedingOrder(P);
+
+        // Assign each fighter to their seeded position
+        for (let i = 0; i < P; i++) {
+          const seed = seedingOrder[i];
+          if (seed <= numFighters) {
+            const fighter = groupFighters[seed - 1];
+            const matchIdx = Math.floor(i / 2);
+            const isFighterA = i % 2 === 0;
+            if (isFighterA) {
+              groupMatches[matchIdx].fighter_a_id = fighter.fighter_id;
+            } else {
+              groupMatches[matchIdx].fighter_b_id = fighter.fighter_id;
+            }
           }
         }
 
-        // ── Handle byes (fighter with no opponent auto-advances) ───────────
-        for (let m = 0; m < firstRoundSize; m++) {
-          if (groupMatches[m].fighter_a_id && !groupMatches[m].fighter_b_id) {
-            groupMatches[m].winner_id = groupMatches[m].fighter_a_id;
-            groupMatches[m].status = "walkover";
+        // Helper to check if a match at a flat index has any active fighters in its subtree
+        const hasFightersInSubtree = (idx: number): boolean => {
+          if (idx < firstRoundSize) {
+            return !!(groupMatches[idx].fighter_a_id || groupMatches[idx].fighter_b_id);
           }
-        }
+          let roundIdx = -1;
+          for (let r = 0; r < roundSizes.length; r++) {
+            if (idx >= roundStarts[r] && idx < roundStarts[r] + roundSizes[r]) {
+              roundIdx = r;
+              break;
+            }
+          }
+          if (roundIdx <= 0) return false;
+          const offset = idx - roundStarts[roundIdx];
+          const srcA = roundStarts[roundIdx - 1] + 2 * offset;
+          const srcB = roundStarts[roundIdx - 1] + 2 * offset + 1;
+          return hasFightersInSubtree(srcA) || hasFightersInSubtree(srcB);
+        };
 
-        // ── Propagate bye winners into next round ────────────────────────
+        // ── Propagate and handle all byes recursively ───────────────────
         for (let idx = 0; idx < groupMatches.length; idx++) {
           const currentM = groupMatches[idx];
-          if ((currentM.status === "completed" || currentM.status === "walkover") && currentM.winner_id) {
-            // Find which round this match belongs to
+
+          let canHaveA = true;
+          let canHaveB = true;
+
+          if (idx >= firstRoundSize) {
             let roundIdx = -1;
             for (let r = 0; r < roundSizes.length; r++) {
               if (idx >= roundStarts[r] && idx < roundStarts[r] + roundSizes[r]) {
@@ -601,17 +661,50 @@ export default function AdminPage() {
                 break;
               }
             }
-            if (roundIdx === -1 || roundIdx + 1 >= roundSizes.length) continue;
-
             const offset = idx - roundStarts[roundIdx];
-            const nextMatchIdx = roundStarts[roundIdx + 1] + Math.floor(offset / 2);
-            const isFighterA = offset % 2 === 0;
+            const srcA = roundStarts[roundIdx - 1] + 2 * offset;
+            const srcB = roundStarts[roundIdx - 1] + 2 * offset + 1;
 
-            if (nextMatchIdx < groupMatches.length) {
-              if (isFighterA) {
-                groupMatches[nextMatchIdx].fighter_a_id = currentM.winner_id;
-              } else {
-                groupMatches[nextMatchIdx].fighter_b_id = currentM.winner_id;
+            canHaveA = hasFightersInSubtree(srcA);
+            canHaveB = hasFightersInSubtree(srcB);
+          } else {
+            canHaveA = !!currentM.fighter_a_id;
+            canHaveB = !!currentM.fighter_b_id;
+          }
+
+          if (canHaveA && !canHaveB) {
+            if (currentM.fighter_a_id) {
+              currentM.winner_id = currentM.fighter_a_id;
+              currentM.status = "walkover";
+            }
+          } else if (!canHaveA && canHaveB) {
+            if (currentM.fighter_b_id) {
+              currentM.winner_id = currentM.fighter_b_id;
+              currentM.status = "walkover";
+            }
+          } else if (!canHaveA && !canHaveB) {
+            currentM.status = "walkover";
+          }
+
+          if ((currentM.status === "completed" || currentM.status === "walkover") && currentM.winner_id) {
+            let roundIdx = -1;
+            for (let r = 0; r < roundSizes.length; r++) {
+              if (idx >= roundStarts[r] && idx < roundStarts[r] + roundSizes[r]) {
+                roundIdx = r;
+                break;
+              }
+            }
+            if (roundIdx !== -1 && roundIdx + 1 < roundSizes.length) {
+              const offset = idx - roundStarts[roundIdx];
+              const nextMatchIdx = roundStarts[roundIdx + 1] + Math.floor(offset / 2);
+              const isFighterA = offset % 2 === 0;
+
+              if (nextMatchIdx < groupMatches.length) {
+                if (isFighterA) {
+                  groupMatches[nextMatchIdx].fighter_a_id = currentM.winner_id;
+                } else {
+                  groupMatches[nextMatchIdx].fighter_b_id = currentM.winner_id;
+                }
               }
             }
           }
@@ -631,10 +724,8 @@ export default function AdminPage() {
 
       if (isDemoMode) {
         let localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
-        // Clear previous matches for this championship
         localMatches = localMatches.filter((m: any) => m.championship_id !== selectedChampId);
         
-        // Assign UUIDs/IDs for local matches
         const matchesWithIds = matchesToInsert.map((m) => ({
           ...m,
           id: "match-" + Math.random().toString(36).substring(2, 11),
@@ -1844,20 +1935,142 @@ export default function AdminPage() {
                   <p className="column-subtitle">Control and record outcomes for scheduled bracket matches</p>
                 </div>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {matches.length > 0 && (() => {
+                    const activeMatchKeys = Array.from(new Set(matches.map(m => m.ring_number?.split(" | CATEGORY:")[1]).filter(Boolean)));
+                    
+                    const uniqueAges = Array.from(new Set(
+                      activeMatchKeys.map(k => {
+                        const reg = registrations.find(r => `${r.age_category_id}-${r.weight_category_id}-${r.gender.toLowerCase()}` === k.toLowerCase());
+                        return reg?.age_categories?.name || null;
+                      }).filter((a): a is string => !!a)
+                    )).sort();
+
+                    const uniqueGenders = Array.from(new Set(
+                      activeMatchKeys.map(k => {
+                        const reg = registrations.find(r => `${r.age_category_id}-${r.weight_category_id}-${r.gender.toLowerCase()}` === k.toLowerCase());
+                        return reg?.gender || null;
+                      }).filter((g): g is string => !!g)
+                    )).map(g => g.toLowerCase());
+
+                    const uniqueWeights = Array.from(new Set(
+                      activeMatchKeys.map(k => {
+                        const reg = registrations.find(r => `${r.age_category_id}-${r.weight_category_id}-${r.gender.toLowerCase()}` === k.toLowerCase());
+                        return reg?.weight_categories?.name || null;
+                      }).filter((w): w is string => !!w)
+                    )).sort((a, b) => {
+                      const numA = parseFloat(a.replace(/[^\d.-]/g, '')) || 0;
+                      const numB = parseFloat(b.replace(/[^\d.-]/g, '')) || 0;
+                      return numA - numB;
+                    });
+
+                    return (
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {/* Age Category Filter */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', letterSpacing: '0.05em' }}>Age Category</span>
+                          <select
+                            value={selectedMatchAge}
+                            onChange={(e) => setSelectedMatchAge(e.target.value)}
+                            className="form-input"
+                            style={{ width: 'auto', minWidth: '150px', padding: '6px 10px', fontSize: '12px', height: '34px', backgroundColor: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.12)', color: 'var(--text-primary)' }}
+                          >
+                            <option value="all">All Ages</option>
+                            {uniqueAges.map(age => (
+                              <option key={age} value={age}>{age}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Gender Filter */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', letterSpacing: '0.05em' }}>Gender</span>
+                          <select
+                            value={selectedMatchGender}
+                            onChange={(e) => setSelectedMatchGender(e.target.value)}
+                            className="form-input"
+                            style={{ width: 'auto', minWidth: '120px', padding: '6px 10px', fontSize: '12px', height: '34px', backgroundColor: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.12)', color: 'var(--text-primary)' }}
+                          >
+                            <option value="all">All Genders</option>
+                            {uniqueGenders.map(g => (
+                              <option key={g} value={g}>{g === 'male' || g === 'm' ? 'Male' : 'Female'}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Weight Category Filter */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', letterSpacing: '0.05em' }}>Weight</span>
+                          <select
+                            value={selectedMatchWeight}
+                            onChange={(e) => setSelectedMatchWeight(e.target.value)}
+                            className="form-input"
+                            style={{ width: 'auto', minWidth: '130px', padding: '6px 10px', fontSize: '12px', height: '34px', backgroundColor: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.12)', color: 'var(--text-primary)' }}
+                          >
+                            <option value="all">All Weights</option>
+                            {uniqueWeights.map(w => (
+                              <option key={w} value={w}>{w}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {(selectedMatchAge !== "all" || selectedMatchGender !== "all" || selectedMatchWeight !== "all") && (
+                          <button
+                            onClick={() => {
+                              setSelectedMatchAge("all");
+                              setSelectedMatchGender("all");
+                              setSelectedMatchWeight("all");
+                            }}
+                            className="btn-action-small"
+                            style={{ alignSelf: 'flex-end', height: '34px', padding: '0 12px', backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>restart_alt</span>
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {matches.length > 0 && (
-                    <select
-                      value={selectedMatchCategory}
-                      onChange={(e) => setSelectedMatchCategory(e.target.value)}
-                      className="form-input"
-                      style={{ width: 'auto', minWidth: '220px', padding: '8px 12px', fontSize: '13px', backgroundColor: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.12)', color: 'var(--text-primary)' }}
-                    >
-                      <option value="all">All Categories</option>
-                      {Array.from(new Set(matches.map(m => m.ring_number?.split(" | CATEGORY:")[1]).filter(Boolean))).map(catKey => (
-                        <option key={catKey} value={catKey}>
-                          {formatDivisionKey(catKey)}
-                        </option>
-                      ))}
-                    </select>
+                    <div style={{ display: 'flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', background: 'var(--midnight)', height: '38px', marginRight: '8px' }}>
+                      <button
+                        onClick={() => setMatchViewMode("bracket")}
+                        style={{
+                          height: '100%',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '0 16px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: matchViewMode === "bracket" ? 'var(--neo-red)' : 'transparent',
+                          color: '#FFFFFF',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>schema</span>
+                        Bracket Tree
+                      </button>
+                      <button
+                        onClick={() => setMatchViewMode("list")}
+                        style={{
+                          height: '100%',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '0 16px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: matchViewMode === "list" ? 'var(--neo-red)' : 'transparent',
+                          color: '#FFFFFF',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>list</span>
+                        List View
+                      </button>
+                    </div>
                   )}
                   <button
                     onClick={handleDownloadPDF}
@@ -2036,8 +2249,18 @@ export default function AdminPage() {
                   };
 
                   const filteredGroups = Object.entries(catGroups).filter(([catKey]) => {
-                    if (selectedMatchCategory === "all") return true;
-                    return catKey === selectedMatchCategory;
+                    const reg = registrations.find(r => `${r.age_category_id}-${r.weight_category_id}-${r.gender.toLowerCase()}` === catKey.toLowerCase());
+                    if (!reg) return true;
+                    
+                    const ageName = reg.age_categories?.name;
+                    const weightName = reg.weight_categories?.name;
+                    const gender = reg.gender.toLowerCase();
+
+                    if (selectedMatchAge !== "all" && ageName !== selectedMatchAge) return false;
+                    if (selectedMatchGender !== "all" && gender !== selectedMatchGender.toLowerCase()) return false;
+                    if (selectedMatchWeight !== "all" && weightName !== selectedMatchWeight) return false;
+                    
+                    return true;
                   });
 
                   return filteredGroups.map(([catKey, catMatches]) => {
@@ -2058,7 +2281,7 @@ export default function AdminPage() {
                               <span className="material-symbols-outlined" style={{ fontSize: '20px', color: 'var(--neo-red)' }}>military_tech</span>
                               <div>
                                 <div style={{ fontSize: '14px', fontWeight: '800', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-primary)' }}>
-                                  {formatDivisionKey(catKey)}
+                                  {getDivisionLabel(catKey)}
                                 </div>
                                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
                                   {totalCount} matches · {catMatches.filter(m => m.fighter_a_id || m.fighter_b_id).length} active fighter slots
@@ -2080,75 +2303,222 @@ export default function AdminPage() {
                         </div>
 
                         {/* Matches in this category */}
-                        {sortedMatches.map((match) => {
-                          const fighterAName = getFighterLabel(match, 'a');
-                          const fighterBName = getFighterLabel(match, 'b');
-                          const winnerName = match.winner_id === match.fighter_a_id ? fighterAName : fighterBName;
-                          const isCompleted = match.status === "completed";
-                          const ringLabel = match.ring_number?.split(" | CATEGORY:")[0] || "Ring 1";
+                        {matchViewMode === "bracket" ? (() => {
+                          const roundGroups: { [key: string]: typeof catMatches } = {};
+                          catMatches.forEach(m => {
+                            const rName = m.round_name || "General";
+                            if (!roundGroups[rName]) roundGroups[rName] = [];
+                            roundGroups[rName].push(m);
+                          });
+
+                          function getRoundPriority(roundName: string): number {
+                            const name = roundName.toLowerCase();
+                            if (name.includes("round 1") || name.includes("round of 16")) return 1;
+                            if (name.includes("quarter") || name.includes("qf")) return 2;
+                            if (name.includes("semi") || name.includes("sf")) return 3;
+                            if (name.includes("final")) return 4;
+                            return 99;
+                          }
+
+                          const sortedRoundNames = Object.keys(roundGroups).sort((a, b) => {
+                            const prioA = getRoundPriority(a);
+                            const prioB = getRoundPriority(b);
+                            if (prioA !== prioB) return prioA - prioB;
+                            return a.localeCompare(b);
+                          });
 
                           return (
-                            <div className="match-row" key={match.id} style={{ padding: '18px 20px', borderRadius: 0, borderBottom: '1px solid rgba(255,255,255,0.03)', borderLeft: `3px solid ${isCompleted ? 'var(--success-green)' : 'transparent'}` }}>
-                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginRight: '16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', fontWeight: 'bold' }}>
-                                #{match.match_number}
-                              </div>
-                              
-                              <div className="fighter-pairing" style={{ flex: 1.5 }}>
-                                <div className="fighter-details">
-                                  <div className="fighter-pic">
-                                    <img src={getFighterAvatar(match.fighter_a_id || undefined)} alt={fighterAName} />
-                                  </div>
-                                  <div className="fighter-info">
-                                    <strong style={{ color: match.winner_id === match.fighter_a_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterAName}</strong>
-                                    <small>{getFighterRegistrationDetails(match.fighter_a_id || undefined) || ""}</small>
-                                  </div>
-                                </div>
-                                <div className="vs-divider">VS</div>
-                                <div className="fighter-details right">
-                                  <div className="fighter-pic">
-                                    <img src={getFighterAvatar(match.fighter_b_id || undefined)} alt={fighterBName} />
-                                  </div>
-                                  <div className="fighter-info">
-                                    <strong style={{ color: match.winner_id === match.fighter_b_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterBName}</strong>
-                                    <small>{getFighterRegistrationDetails(match.fighter_b_id || undefined) || ""}</small>
-                                  </div>
-                                </div>
-                              </div>
+                            <div style={{ display: 'flex', gap: '24px', overflowX: 'auto', padding: '24px 20px', background: 'var(--midnight)', borderTop: '1px solid rgba(255,255,255,0.03)' }} className="custom-scrollbar">
+                              {sortedRoundNames.map((rName) => {
+                                const roundMatches = [...roundGroups[rName]].sort((a, b) => a.match_number - b.match_number);
+                                return (
+                                  <div key={rName} style={{ display: 'flex', flexDirection: 'column', width: '280px', flexShrink: 0 }}>
+                                    {/* Round Header */}
+                                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '8px', borderLeft: '3px solid var(--neo-red)', marginBottom: '16px' }}>
+                                      <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-primary)', textTransform: 'uppercase' }}>{rName}</div>
+                                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{roundMatches.length} {roundMatches.length === 1 ? 'Match' : 'Matches'}</div>
+                                    </div>
 
-                              <div className="ring-round-info" style={{ flex: 1.2, borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '20px' }}>
-                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                  <span className="ring-label">{ringLabel}</span>
-                                  <span className="round-label" style={{ background: match.round_name === "Final" ? 'rgba(255,149,0,0.15)' : match.round_name === "Semi Final" ? 'rgba(255,59,48,0.1)' : 'rgba(255,255,255,0.05)', color: match.round_name === "Final" ? 'var(--warning-amber)' : match.round_name === "Semi Final" ? 'var(--neo-red)' : 'var(--text-secondary)' }}>
-                                    {match.round_name}
-                                  </span>
-                                </div>
-                                {isCompleted ? (
-                                  <span style={{ fontSize: '12px', color: 'var(--success-green)', fontWeight: '700', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                    <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>emoji_events</span>
-                                    {winnerName} → {getAdvanceRoundText(match.id)}
-                                  </span>
-                                ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
-                                    <button
-                                      onClick={() => handleRecordWinner(match.id, match.fighter_a_id)}
-                                      disabled={!match.fighter_a_id || !match.fighter_b_id}
-                                      style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
-                                    >
-                                      ✓ {fighterAName.startsWith("Waiting") || fighterAName.startsWith("TBD") ? "A" : fighterAName.split(" ")[0]} Wins
-                                    </button>
-                                    <button
-                                      onClick={() => handleRecordWinner(match.id, match.fighter_b_id)}
-                                      disabled={!match.fighter_a_id || !match.fighter_b_id}
-                                      style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
-                                    >
-                                      ✓ {fighterBName.startsWith("Waiting") || fighterBName.startsWith("TBD") ? "B" : fighterBName.split(" ")[0]} Wins
-                                    </button>
+                                    {/* Round Matches List */}
+                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-around', gap: '20px', flex: 1, minHeight: '380px' }}>
+                                      {roundMatches.map((match) => {
+                                        const fighterAName = getFighterLabel(match, 'a');
+                                        const fighterBName = getFighterLabel(match, 'b');
+                                        const isCompleted = match.status === "completed";
+                                        const isLive = match.status === "live" || match.status === "ongoing";
+                                        const winA = match.winner_id === match.fighter_a_id;
+                                        const winB = match.winner_id === match.fighter_b_id;
+
+                                        return (
+                                          <div
+                                            key={match.id}
+                                            style={{
+                                              background: 'var(--slate)',
+                                              border: isLive ? '2px solid var(--neo-red)' : '1px solid rgba(255,255,255,0.06)',
+                                              borderRadius: '10px',
+                                              overflow: 'hidden',
+                                              boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+                                              position: 'relative'
+                                            }}
+                                          >
+                                            {/* Match Badge / Number */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0,0,0,0.2)', padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                              <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)' }}>MATCH #{match.match_number}</span>
+                                              {isLive && (
+                                                <span style={{ fontSize: '9px', fontWeight: '800', color: '#FFFFFF', background: 'var(--neo-red)', padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase' }}>LIVE</span>
+                                              )}
+                                              {isCompleted && (
+                                                <span style={{ fontSize: '9px', fontWeight: '800', color: 'var(--success-green)', textTransform: 'uppercase' }}>DONE</span>
+                                              )}
+                                            </div>
+
+                                            {/* Fighters Pairing */}
+                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                              {/* Fighter A */}
+                                              <div
+                                                style={{
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'space-between',
+                                                  padding: '10px 12px',
+                                                  background: winA ? 'rgba(52,199,89,0.05)' : 'transparent',
+                                                  borderBottom: '1px solid rgba(255,255,255,0.03)'
+                                                }}
+                                              >
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                                  <img
+                                                    src={getFighterAvatar(match.fighter_a_id || undefined)}
+                                                    alt=""
+                                                    style={{ width: '24px', height: '24px', borderRadius: '4px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.1)' }}
+                                                  />
+                                                  <span style={{ fontSize: '13px', fontWeight: winA ? '700' : '500', color: winA ? 'var(--success-green)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {fighterAName}
+                                                  </span>
+                                                </div>
+                                                {winA && <span className="material-symbols-outlined" style={{ fontSize: '15px', color: 'var(--success-green)' }}>emoji_events</span>}
+                                              </div>
+
+                                              {/* Fighter B */}
+                                              <div
+                                                style={{
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'space-between',
+                                                  padding: '10px 12px',
+                                                  background: winB ? 'rgba(52,199,89,0.05)' : 'transparent'
+                                                }}
+                                              >
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                                                  <img
+                                                    src={getFighterAvatar(match.fighter_b_id || undefined)}
+                                                    alt=""
+                                                    style={{ width: '24px', height: '24px', borderRadius: '4px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.1)' }}
+                                                  />
+                                                  <span style={{ fontSize: '13px', fontWeight: winB ? '700' : '500', color: winB ? 'var(--success-green)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {fighterBName}
+                                                  </span>
+                                                </div>
+                                                {winB && <span className="material-symbols-outlined" style={{ fontSize: '15px', color: 'var(--success-green)' }}>emoji_events</span>}
+                                              </div>
+                                            </div>
+
+                                            {/* Quick Winner Selection Footer (only if pending and active) */}
+                                            {!isCompleted && match.fighter_a_id && match.fighter_b_id && (
+                                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: 'rgba(255,255,255,0.05)', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                                                <button
+                                                  onClick={() => handleRecordWinner(match.id, match.fighter_a_id)}
+                                                  style={{ padding: '6px 4px', fontSize: '10px', background: 'rgba(255,255,255,0.02)', border: 'none', cursor: 'pointer', textAlign: 'center', fontWeight: 'bold', color: 'var(--success-green)' }}
+                                                >
+                                                  {fighterAName.split(" ")[0]} Wins
+                                                </button>
+                                                <button
+                                                  onClick={() => handleRecordWinner(match.id, match.fighter_b_id)}
+                                                  style={{ padding: '6px 4px', fontSize: '10px', background: 'rgba(255,255,255,0.02)', border: 'none', cursor: 'pointer', textAlign: 'center', fontWeight: 'bold', color: 'var(--success-green)' }}
+                                                >
+                                                  {fighterBName.split(" ")[0]} Wins
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                )}
-                              </div>
+                                );
+                              })}
                             </div>
                           );
-                        })}
+                        })() : (
+                          sortedMatches.map((match) => {
+                            const fighterAName = getFighterLabel(match, 'a');
+                            const fighterBName = getFighterLabel(match, 'b');
+                            const winnerName = match.winner_id === match.fighter_a_id ? fighterAName : fighterBName;
+                            const isCompleted = match.status === "completed";
+                            const ringLabel = match.ring_number?.split(" | CATEGORY:")[0] || "Ring 1";
+
+                            return (
+                              <div className="match-row" key={match.id} style={{ padding: '18px 20px', borderRadius: 0, borderBottom: '1px solid rgba(255,255,255,0.03)', borderLeft: `3px solid ${isCompleted ? 'var(--success-green)' : 'transparent'}` }}>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginRight: '16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', fontWeight: 'bold' }}>
+                                  #{match.match_number}
+                                </div>
+                                
+                                <div className="fighter-pairing" style={{ flex: 1.5 }}>
+                                  <div className="fighter-details">
+                                    <div className="fighter-pic">
+                                      <img src={getFighterAvatar(match.fighter_a_id || undefined)} alt={fighterAName} />
+                                    </div>
+                                    <div className="fighter-info">
+                                      <strong style={{ color: match.winner_id === match.fighter_a_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterAName}</strong>
+                                      <small>{getFighterRegistrationDetails(match.fighter_a_id || undefined) || ""}</small>
+                                    </div>
+                                  </div>
+                                  <div className="vs-divider">VS</div>
+                                  <div className="fighter-details right">
+                                    <div className="fighter-pic">
+                                      <img src={getFighterAvatar(match.fighter_b_id || undefined)} alt={fighterBName} />
+                                    </div>
+                                    <div className="fighter-info">
+                                      <strong style={{ color: match.winner_id === match.fighter_b_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterBName}</strong>
+                                      <small>{getFighterRegistrationDetails(match.fighter_b_id || undefined) || ""}</small>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="ring-round-info" style={{ flex: 1.2, borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '20px' }}>
+                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                    <span className="ring-label">{ringLabel}</span>
+                                    <span className="round-label" style={{ background: match.round_name === "Final" ? 'rgba(255,149,0,0.15)' : match.round_name === "Semi Final" ? 'rgba(255,59,48,0.1)' : 'rgba(255,255,255,0.05)', color: match.round_name === "Final" ? 'var(--warning-amber)' : match.round_name === "Semi Final" ? 'var(--neo-red)' : 'var(--text-secondary)' }}>
+                                      {match.round_name}
+                                    </span>
+                                  </div>
+                                  {isCompleted ? (
+                                    <span style={{ fontSize: '12px', color: 'var(--success-green)', fontWeight: '700', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                      <span className="material-symbols-outlined" style={{ fontSize: '15px' }}>emoji_events</span>
+                                      {winnerName} → {getAdvanceRoundText(match.id)}
+                                    </span>
+                                  ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+                                      <button
+                                        onClick={() => handleRecordWinner(match.id, match.fighter_a_id)}
+                                        disabled={!match.fighter_a_id || !match.fighter_b_id}
+                                        style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
+                                      >
+                                        ✓ {fighterAName.startsWith("Waiting") || fighterAName.startsWith("TBD") ? "A" : fighterAName.split(" ")[0]} Wins
+                                      </button>
+                                      <button
+                                        onClick={() => handleRecordWinner(match.id, match.fighter_b_id)}
+                                        disabled={!match.fighter_a_id || !match.fighter_b_id}
+                                        style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
+                                      >
+                                        ✓ {fighterBName.startsWith("Waiting") || fighterBName.startsWith("TBD") ? "B" : fighterBName.split(" ")[0]} Wins
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     );
                   });

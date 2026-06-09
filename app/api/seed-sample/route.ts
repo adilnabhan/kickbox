@@ -1,0 +1,122 @@
+import { NextRequest, NextResponse } from "next/server";
+
+// 100 sample fighters embedded directly — optimized for testing bracket sizes of 10 and 20+
+const SAMPLE_FIGHTERS = [
+  // ── Young Cadets Male -24 kg (Age 9-10) ── 10 students
+  { fighter_id: "STUD001", full_name: "John Male 9-10 -24kg 1", age: 9, gender: "Male", weight_kg: 23.2, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000201", email: "student1@example.com" },
+  { fighter_id: "STUD002", full_name: "Ryan Male 9-10 -24kg 2", age: 10, gender: "Male", weight_kg: 22.8, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000202", email: "student2@example.com" },
+  { fighter_id: "STUD003", full_name: "David Male 9-10 -24kg 3", age: 9, gender: "Male", weight_kg: 23.9, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000203", email: "student3@example.com" },
+  { fighter_id: "STUD004", full_name: "Alex Male 9-10 -24kg 4", age: 10, gender: "Male", weight_kg: 21.5, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000204", email: "student4@example.com" },
+  { fighter_id: "STUD005", full_name: "Chris Male 9-10 -24kg 5", age: 9, gender: "Male", weight_kg: 22.0, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000205", email: "student5@example.com" },
+  { fighter_id: "STUD006", full_name: "Aman Male 9-10 -24kg 6", age: 10, gender: "Male", weight_kg: 23.6, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000206", email: "student6@example.com" },
+  { fighter_id: "STUD007", full_name: "Rahul Male 9-10 -24kg 7", age: 9, gender: "Male", weight_kg: 23.1, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000207", email: "student7@example.com" },
+  { fighter_id: "STUD008", full_name: "Mike Male 9-10 -24kg 8", age: 10, gender: "Male", weight_kg: 22.4, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000208", email: "student8@example.com" },
+  { fighter_id: "STUD009", full_name: "Arjun Male 9-10 -24kg 9", age: 9, gender: "Male", weight_kg: 23.7, gym_club: "Elite Combat", coach_name: "Coach A", phone: "9000000209", email: "student9@example.com" },
+  { fighter_id: "STUD010", full_name: "Adil Male 9-10 -24kg 10", age: 10, gender: "Male", weight_kg: 23.0, gym_club: "Tiger Gym", coach_name: "Coach B", phone: "9000000210", email: "student10@example.com" },
+
+  // ── Young Cadets Female -27 kg (Age 9-10) ── 22 students
+  { fighter_id: "STUD011", full_name: "Sophia Female 9-10 -27kg 1", age: 9, gender: "Female", weight_kg: 25.5, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000211", email: "stud11@example.com" },
+  { fighter_id: "STUD012", full_name: "Emma Female 9-10 -27kg 2", age: 10, gender: "Female", weight_kg: 26.1, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000212", email: "stud12@example.com" },
+  { fighter_id: "STUD013", full_name: "Olivia Female 9-10 -27kg 3", age: 9, gender: "Female", weight_kg: 24.8, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000213", email: "stud13@example.com" },
+  { fighter_id: "STUD014", full_name: "Ava Female 9-10 -27kg 4", age: 10, gender: "Female", weight_kg: 25.9, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000214", email: "stud14@example.com" },
+  { fighter_id: "STUD015", full_name: "Isabella Female 9-10 -27kg 5", age: 9, gender: "Female", weight_kg: 26.4, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000215", email: "stud15@example.com" },
+  { fighter_id: "STUD016", full_name: "Mia Female 9-10 -27kg 6", age: 10, gender: "Female", weight_kg: 25.0, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000216", email: "stud16@example.com" },
+  { fighter_id: "STUD017", full_name: "Amelia Female 9-10 -27kg 7", age: 9, gender: "Female", weight_kg: 26.2, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000217", email: "stud17@example.com" },
+  { fighter_id: "STUD018", full_name: "Harper Female 9-10 -27kg 8", age: 10, gender: "Female", weight_kg: 24.9, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000218", email: "stud18@example.com" },
+  { fighter_id: "STUD019", full_name: "Evelyn Female 9-10 -27kg 9", age: 9, gender: "Female", weight_kg: 25.8, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000219", email: "stud19@example.com" },
+  { fighter_id: "STUD020", full_name: "Abigail Female 9-10 -27kg 10", age: 10, gender: "Female", weight_kg: 26.0, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000220", email: "stud20@example.com" },
+  { fighter_id: "STUD021", full_name: "Emily Female 9-10 -27kg 11", age: 9, gender: "Female", weight_kg: 25.3, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000221", email: "stud21@example.com" },
+  { fighter_id: "STUD022", full_name: "Elizabeth Female 9-10 -27kg 12", age: 10, gender: "Female", weight_kg: 26.7, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000222", email: "stud22@example.com" },
+  { fighter_id: "STUD023", full_name: "Mila Female 9-10 -27kg 13", age: 9, gender: "Female", weight_kg: 24.6, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000223", email: "stud23@example.com" },
+  { fighter_id: "STUD024", full_name: "Ella Female 9-10 -27kg 14", age: 10, gender: "Female", weight_kg: 25.1, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000224", email: "stud24@example.com" },
+  { fighter_id: "STUD025", full_name: "Avery Female 9-10 -27kg 15", age: 9, gender: "Female", weight_kg: 26.5, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000225", email: "stud25@example.com" },
+  { fighter_id: "STUD026", full_name: "Sofia Female 9-10 -27kg 16", age: 10, gender: "Female", weight_kg: 24.7, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000226", email: "stud26@example.com" },
+  { fighter_id: "STUD027", full_name: "Camila Female 9-10 -27kg 17", age: 9, gender: "Female", weight_kg: 25.2, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000227", email: "stud27@example.com" },
+  { fighter_id: "STUD028", full_name: "Aria Female 9-10 -27kg 18", age: 10, gender: "Female", weight_kg: 26.3, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000228", email: "stud28@example.com" },
+  { fighter_id: "STUD029", full_name: "Scarlett Female 9-10 -27kg 19", age: 9, gender: "Female", weight_kg: 25.6, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000229", email: "stud29@example.com" },
+  { fighter_id: "STUD030", full_name: "Victoria Female 9-10 -27kg 20", age: 10, gender: "Female", weight_kg: 26.6, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000230", email: "stud30@example.com" },
+  { fighter_id: "STUD031", full_name: "Madison Female 9-10 -27kg 21", age: 9, gender: "Female", weight_kg: 24.5, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000231", email: "stud31@example.com" },
+  { fighter_id: "STUD032", full_name: "Luna Female 9-10 -27kg 22", age: 10, gender: "Female", weight_kg: 25.4, gym_club: "Power Kick", coach_name: "Coach C", phone: "9000000232", email: "stud32@example.com" },
+
+  // ── Older Cadets (Age 11-12) Male -32 kg ── 5 students
+  { fighter_id: "STUD033", full_name: "Arjun Male 11-12 -32kg 1", age: 11, gender: "Male", weight_kg: 31.2, gym_club: "Fight Academy", coach_name: "Coach A" },
+  { fighter_id: "STUD034", full_name: "John Male 11-12 -32kg 2", age: 12, gender: "Male", weight_kg: 30.5, gym_club: "Elite Combat", coach_name: "Coach B" },
+  { fighter_id: "STUD035", full_name: "David Male 11-12 -32kg 3", age: 11, gender: "Male", weight_kg: 29.8, gym_club: "Power Kick", coach_name: "Coach C" },
+  { fighter_id: "STUD036", full_name: "Ryan Male 11-12 -32kg 4", age: 12, gender: "Male", weight_kg: 31.9, gym_club: "Warriors Club", coach_name: "Coach D" },
+  { fighter_id: "STUD037", full_name: "Aman Male 11-12 -32kg 5", age: 11, gender: "Male", weight_kg: 30.0, gym_club: "Tiger Gym", coach_name: "Coach A" },
+
+  // ── Older Cadets (Age 11-12) Female -37 kg ── 5 students
+  { fighter_id: "STUD038", full_name: "Neha Female 11-12 -37kg 1", age: 11, gender: "Female", weight_kg: 36.2, gym_club: "Fight Academy", coach_name: "Coach A" },
+  { fighter_id: "STUD039", full_name: "Priya Female 11-12 -37kg 2", age: 12, gender: "Female", weight_kg: 35.5, gym_club: "Elite Combat", coach_name: "Coach B" },
+  { fighter_id: "STUD040", full_name: "Kirti Female 11-12 -37kg 3", age: 11, gender: "Female", weight_kg: 34.8, gym_club: "Power Kick", coach_name: "Coach C" },
+  { fighter_id: "STUD041", full_name: "Anjali Female 11-12 -37kg 4", age: 12, gender: "Female", weight_kg: 36.9, gym_club: "Warriors Club", coach_name: "Coach D" },
+  { fighter_id: "STUD042", full_name: "Ritu Female 11-12 -37kg 5", age: 11, gender: "Female", weight_kg: 35.0, gym_club: "Tiger Gym", coach_name: "Coach A" },
+
+  // ── Remaining random fighters to complete 100 records ──
+  { fighter_id: "F043", full_name: "John 43", age: 36, gender: "Male", weight_kg: 73.9, gym_club: "Elite Combat", coach_name: "Coach D", phone: "9000000043", email: "fighter43@example.com" },
+  { fighter_id: "F044", full_name: "John 44", age: 14, gender: "Male", weight_kg: 93.6, gym_club: "Fight Academy", coach_name: "Coach A", phone: "9000000044", email: "fighter44@example.com" },
+  { fighter_id: "F045", full_name: "Adil 45", age: 45, gender: "Female", weight_kg: 82.6, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000045", email: "fighter45@example.com" },
+  { fighter_id: "F046", full_name: "Aman 46", age: 29, gender: "Female", weight_kg: 45, gym_club: "Fight Academy", coach_name: "Coach C", phone: "9000000046", email: "fighter46@example.com" },
+  { fighter_id: "F047", full_name: "John 47", age: 17, gender: "Female", weight_kg: 57.5, gym_club: "Warriors Club", coach_name: "Coach C", phone: "9000000047", email: "fighter47@example.com" },
+  { fighter_id: "F048", full_name: "Chris 48", age: 36, gender: "Female", weight_kg: 59.1, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000048", email: "fighter48@example.com" },
+  { fighter_id: "F049", full_name: "Arjun 49", age: 29, gender: "Female", weight_kg: 43.6, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000049", email: "fighter49@example.com" },
+  { fighter_id: "F050", full_name: "Alex 50", age: 21, gender: "Male", weight_kg: 67.1, gym_club: "Warriors Club", coach_name: "Coach C", phone: "9000000050", email: "fighter50@example.com" },
+  { fighter_id: "F051", full_name: "Alex 51", age: 21, gender: "Male", weight_kg: 72.7, gym_club: "Fight Academy", coach_name: "Coach C", phone: "9000000051", email: "fighter51@example.com" },
+  { fighter_id: "F052", full_name: "Rahul 52", age: 18, gender: "Male", weight_kg: 83.3, gym_club: "Warriors Club", coach_name: "Coach A", phone: "9000000052", email: "fighter52@example.com" },
+  { fighter_id: "F053", full_name: "Alex 53", age: 30, gender: "Male", weight_kg: 90.3, gym_club: "Power Kick", coach_name: "Coach A", phone: "9000000053", email: "fighter53@example.com" },
+  { fighter_id: "F054", full_name: "Rahul 54", age: 22, gender: "Male", weight_kg: 88.9, gym_club: "Power Kick", coach_name: "Coach B", phone: "9000000054", email: "fighter54@example.com" },
+  { fighter_id: "F055", full_name: "Ryan 55", age: 36, gender: "Male", weight_kg: 43.1, gym_club: "Tiger Gym", coach_name: "Coach C", phone: "9000000055", email: "fighter55@example.com" },
+  { fighter_id: "F056", full_name: "Arjun 56", age: 29, gender: "Female", weight_kg: 60.4, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000056", email: "fighter56@example.com" },
+  { fighter_id: "F057", full_name: "Rahul 57", age: 43, gender: "Female", weight_kg: 47.2, gym_club: "Elite Combat", coach_name: "Coach D", phone: "9000000057", email: "fighter57@example.com" },
+  { fighter_id: "F058", full_name: "Aman 58", age: 17, gender: "Female", weight_kg: 83.6, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000058", email: "fighter58@example.com" },
+  { fighter_id: "F059", full_name: "Adil 59", age: 14, gender: "Female", weight_kg: 92.1, gym_club: "Fight Academy", coach_name: "Coach A", phone: "9000000059", email: "fighter59@example.com" },
+  { fighter_id: "F060", full_name: "Arjun 60", age: 44, gender: "Female", weight_kg: 40.8, gym_club: "Elite Combat", coach_name: "Coach C", phone: "9000000060", email: "fighter60@example.com" },
+  { fighter_id: "F061", full_name: "John 61", age: 10, gender: "Male", weight_kg: 83, gym_club: "Tiger Gym", coach_name: "Coach C", phone: "9000000061", email: "fighter61@example.com" },
+  { fighter_id: "F062", full_name: "Chris 62", age: 17, gender: "Male", weight_kg: 49.8, gym_club: "Warriors Club", coach_name: "Coach C", phone: "9000000062", email: "fighter62@example.com" },
+  { fighter_id: "F063", full_name: "Aman 63", age: 10, gender: "Male", weight_kg: 59, gym_club: "Tiger Gym", coach_name: "Coach C", phone: "9000000063", email: "fighter63@example.com" },
+  { fighter_id: "F064", full_name: "John 64", age: 28, gender: "Female", weight_kg: 82.5, gym_club: "Tiger Gym", coach_name: "Coach A", phone: "9000000064", email: "fighter64@example.com" },
+  { fighter_id: "F065", full_name: "Rahul 65", age: 17, gender: "Female", weight_kg: 49.4, gym_club: "Power Kick", coach_name: "Coach A", phone: "9000000065", email: "fighter65@example.com" },
+  { fighter_id: "F066", full_name: "Chris 66", age: 29, gender: "Male", weight_kg: 69.3, gym_club: "Fight Academy", coach_name: "Coach A", phone: "9000000066", email: "fighter66@example.com" },
+  { fighter_id: "F067", full_name: "David 67", age: 35, gender: "Female", weight_kg: 91.9, gym_club: "Tiger Gym", coach_name: "Coach B", phone: "9000000067", email: "fighter67@example.com" },
+  { fighter_id: "F068", full_name: "Mike 68", age: 30, gender: "Male", weight_kg: 42.9, gym_club: "Elite Combat", coach_name: "Coach C", phone: "9000000068", email: "fighter68@example.com" },
+  { fighter_id: "F069", full_name: "Aman 69", age: 18, gender: "Female", weight_kg: 58, gym_club: "Elite Combat", coach_name: "Coach C", phone: "9000000069", email: "fighter69@example.com" },
+  { fighter_id: "F070", full_name: "Ryan 70", age: 27, gender: "Female", weight_kg: 49.7, gym_club: "Tiger Gym", coach_name: "Coach D", phone: "9000000070", email: "fighter70@example.com" },
+  { fighter_id: "F071", full_name: "Rahul 71", age: 45, gender: "Male", weight_kg: 42.1, gym_club: "Warriors Club", coach_name: "Coach A", phone: "9000000071", email: "fighter71@example.com" },
+  { fighter_id: "F072", full_name: "Adil 72", age: 27, gender: "Female", weight_kg: 58.7, gym_club: "Power Kick", coach_name: "Coach B", phone: "9000000072", email: "fighter72@example.com" },
+  { fighter_id: "F073", full_name: "Aman 73", age: 39, gender: "Male", weight_kg: 57.4, gym_club: "Warriors Club", coach_name: "Coach C", phone: "9000000073", email: "fighter73@example.com" },
+  { fighter_id: "F074", full_name: "Chris 74", age: 45, gender: "Male", weight_kg: 52.8, gym_club: "Elite Combat", coach_name: "Coach D", phone: "9000000074", email: "fighter74@example.com" },
+  { fighter_id: "F075", full_name: "Adil 75", age: 22, gender: "Female", weight_kg: 64.9, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000075", email: "fighter75@example.com" },
+  { fighter_id: "F076", full_name: "Aman 76", age: 15, gender: "Male", weight_kg: 59.7, gym_club: "Fight Academy", coach_name: "Coach B", phone: "9000000076", email: "fighter76@example.com" },
+  { fighter_id: "F077", full_name: "Adil 77", age: 30, gender: "Male", weight_kg: 79.6, gym_club: "Warriors Club", coach_name: "Coach A", phone: "9000000077", email: "fighter77@example.com" },
+  { fighter_id: "F078", full_name: "Ryan 78", age: 22, gender: "Female", weight_kg: 89.2, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000078", email: "fighter78@example.com" },
+  { fighter_id: "F079", full_name: "Mike 79", age: 28, gender: "Female", weight_kg: 63.6, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000079", email: "fighter79@example.com" },
+  { fighter_id: "F080", full_name: "Arjun 80", age: 22, gender: "Male", weight_kg: 93, gym_club: "Tiger Gym", coach_name: "Coach D", phone: "9000000080", email: "fighter80@example.com" },
+  { fighter_id: "F081", full_name: "Mike 81", age: 37, gender: "Male", weight_kg: 90.3, gym_club: "Tiger Gym", coach_name: "Coach D", phone: "9000000081", email: "fighter81@example.com" },
+  { fighter_id: "F082", full_name: "Alex 82", age: 14, gender: "Male", weight_kg: 48, gym_club: "Warriors Club", coach_name: "Coach B", phone: "9000000082", email: "fighter82@example.com" },
+  { fighter_id: "F083", full_name: "Chris 83", age: 18, gender: "Female", weight_kg: 80.5, gym_club: "Elite Combat", coach_name: "Coach A", phone: "9000000083", email: "fighter83@example.com" },
+  { fighter_id: "F084", full_name: "Arjun 84", age: 19, gender: "Male", weight_kg: 80.9, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000084", email: "fighter84@example.com" },
+  { fighter_id: "F085", full_name: "David 85", age: 34, gender: "Female", weight_kg: 82.8, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000085", email: "fighter85@example.com" },
+  { fighter_id: "F086", full_name: "Mike 86", age: 13, gender: "Male", weight_kg: 47.5, gym_club: "Fight Academy", coach_name: "Coach A", phone: "9000000086", email: "fighter86@example.com" },
+  { fighter_id: "F087", full_name: "Rahul 87", age: 22, gender: "Female", weight_kg: 75.3, gym_club: "Elite Combat", coach_name: "Coach D", phone: "9000000087", email: "fighter87@example.com" },
+  { fighter_id: "F088", full_name: "Ryan 88", age: 11, gender: "Male", weight_kg: 88.9, gym_club: "Elite Combat", coach_name: "Coach B", phone: "9000000088", email: "fighter88@example.com" },
+  { fighter_id: "F089", full_name: "Rahul 89", age: 19, gender: "Female", weight_kg: 91.5, gym_club: "Fight Academy", coach_name: "Coach D", phone: "9000000089", email: "fighter89@example.com" },
+  { fighter_id: "F090", full_name: "Mike 90", age: 16, gender: "Male", weight_kg: 80.1, gym_club: "Warriors Club", coach_name: "Coach A", phone: "9000000090", email: "fighter90@example.com" },
+  { fighter_id: "F091", full_name: "David 91", age: 44, gender: "Female", weight_kg: 80.4, gym_club: "Warriors Club", coach_name: "Coach D", phone: "9000000091", email: "fighter91@example.com" },
+  { fighter_id: "F092", full_name: "David 92", age: 16, gender: "Female", weight_kg: 64.4, gym_club: "Elite Combat", coach_name: "Coach D", phone: "9000000092", email: "fighter92@example.com" },
+  { fighter_id: "F093", full_name: "David 93", age: 26, gender: "Female", weight_kg: 40.4, gym_club: "Tiger Gym", coach_name: "Coach D", phone: "9000000093", email: "fighter93@example.com" },
+  { fighter_id: "F094", full_name: "Ryan 94", age: 42, gender: "Male", weight_kg: 45.8, gym_club: "Tiger Gym", coach_name: "Coach C", phone: "9000000094", email: "fighter94@example.com" },
+  { fighter_id: "F095", full_name: "Adil 95", age: 25, gender: "Female", weight_kg: 92.5, gym_club: "Fight Academy", coach_name: "Coach A", phone: "9000000095", email: "fighter95@example.com" },
+  { fighter_id: "F096", full_name: "Ryan 96", age: 44, gender: "Female", weight_kg: 62, gym_club: "Elite Combat", coach_name: "Coach A", phone: "9000000096", email: "fighter96@example.com" },
+  { fighter_id: "F097", full_name: "Chris 97", age: 10, gender: "Male", weight_kg: 61.9, gym_club: "Elite Combat", coach_name: "Coach D", phone: "9000000097", email: "fighter97@example.com" },
+  { fighter_id: "F098", full_name: "Rahul 98", age: 38, gender: "Male", weight_kg: 48.5, gym_club: "Warriors Club", coach_name: "Coach B", phone: "9000000098", email: "fighter98@example.com" },
+  { fighter_id: "F099", full_name: "Mike 99", age: 18, gender: "Male", weight_kg: 94.5, gym_club: "Warriors Club", coach_name: "Coach A", phone: "9000000099", email: "fighter99@example.com" },
+  { fighter_id: "F100", full_name: "David 100", age: 16, gender: "Female", weight_kg: 53.7, gym_club: "Elite Combat", coach_name: "Coach A", phone: "9000000100", email: "fighter100@example.com" }
+];
+
+export async function GET() {
+  try {
+    return NextResponse.json({ success: true, fighters: SAMPLE_FIGHTERS });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
