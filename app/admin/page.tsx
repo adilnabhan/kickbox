@@ -1414,22 +1414,35 @@ export default function AdminPage() {
     if (!xlsxPreview.length || !selectedChampId) return;
     setXlsxImporting(true);
     try {
-      const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
-      const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
-      const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
       let successCount = 0;
 
-      for (const f of xlsxPreview) {
-        const fighterId = "fighter-" + Math.random().toString(36).substring(2, 11);
-        const classification = classifyFighterLocal({
-          fighter_id: fighterId,
-          full_name: f.name,
-          age: f.age,
-          gender: f.gender,
-          weight_kg: f.weight
+      // Helper function to generate valid UUIDs
+      const generateUUID = () => {
+        if (typeof crypto !== "undefined" && crypto.randomUUID) {
+          return crypto.randomUUID();
+        }
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
         });
+      };
 
-        if (isDemoMode) {
+      if (isDemoMode) {
+        // Local Demo Mode
+        const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
+        const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
+        const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+
+        for (const f of xlsxPreview) {
+          const fighterId = "fighter-" + Math.random().toString(36).substring(2, 11);
+          const classification = classifyFighterLocal({
+            fighter_id: fighterId,
+            full_name: f.name,
+            age: f.age,
+            gender: f.gender,
+            weight_kg: f.weight
+          });
           const ageCategoryName = classification.age_category;
           const weightCategoryName = classification.weight_category;
 
@@ -1457,32 +1470,139 @@ export default function AdminPage() {
             weight_categories: { name: weightCategoryName }
           });
           successCount++;
-        } else {
-          const { ageCatId, weightCatId } = await findOrCreateCategoriesSupabase(
-            classification.age_category, classification.weight_category, f.gender.toLowerCase(), selectedChampId
-          );
-          const { error: profileErr } = await supabase.from("profiles").insert({ id: fighterId, full_name: f.name });
-          if (profileErr) continue;
-          const { error: regErr } = await supabase.from("registrations").insert({
-            championship_id: selectedChampId, fighter_id: fighterId,
-            age_category_id: ageCatId, weight_category_id: weightCatId,
-            gender: f.gender.toLowerCase(), weight_kg: f.weight, status: "approved",
-            date_of_birth: new Date(new Date().getFullYear() - f.age, 0, 1).toISOString().split("T")[0]
-          });
-          if (!regErr) successCount++;
         }
-      }
 
-      if (isDemoMode) {
         localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
         localStorage.setItem("kickbox_age_categories", JSON.stringify(localAgeCats));
         localStorage.setItem("kickbox_weight_categories", JSON.stringify(localWeightCats));
-      }
 
-      alert(`✅ Imported ${successCount} fighters successfully! Categories auto-assigned by WAK-1F rules.`);
-      setXlsxPreview([]);
-      setXlsxFileName("");
-      setRefreshKey(prev => prev + 1);
+        alert(`✅ Imported ${successCount} fighters successfully in Demo Mode!`);
+        setXlsxPreview([]);
+        setXlsxFileName("");
+        setRefreshKey(prev => prev + 1);
+
+      } else {
+        // Supabase Mode (Optimized bulk upload with valid UUIDs)
+        const classifiedFighters = xlsxPreview.map(f => {
+          const fighterId = generateUUID();
+          const classification = classifyFighterLocal({
+            fighter_id: fighterId,
+            full_name: f.name,
+            age: f.age,
+            gender: f.gender,
+            weight_kg: f.weight
+          });
+          return { f, fighterId, classification };
+        });
+
+        // 1. Fetch existing categories
+        const { data: existingAgeCats, error: ageFetchErr } = await supabase
+          .from("age_categories")
+          .select("id, name")
+          .eq("championship_id", selectedChampId);
+        if (ageFetchErr) throw ageFetchErr;
+
+        const { data: existingWeightCats, error: weightFetchErr } = await supabase
+          .from("weight_categories")
+          .select("id, name, gender")
+          .eq("championship_id", selectedChampId);
+        if (weightFetchErr) throw weightFetchErr;
+
+        const ageCatMap = new Map(existingAgeCats?.map(c => [c.name, c.id]) || []);
+        const weightCatMap = new Map(existingWeightCats?.map(c => [`${c.name}-${c.gender.toLowerCase()}`, c.id]) || []);
+
+        // 2. Identify and bulk insert new categories
+        const newAgeCatsToInsert: any[] = [];
+        const newWeightCatsToInsert: any[] = [];
+
+        classifiedFighters.forEach(({ f, classification }) => {
+          const ageName = classification.age_category;
+          const weightName = classification.weight_category;
+          const gender = f.gender.toLowerCase();
+
+          if (!ageCatMap.has(ageName) && !newAgeCatsToInsert.some(c => c.name === ageName)) {
+            const ageRule = WAK1F_AGE_CATEGORIES.find((r) => r.name === ageName);
+            newAgeCatsToInsert.push({
+              championship_id: selectedChampId,
+              name: ageName,
+              min_age: ageRule ? ageRule.minAge : 9,
+              max_age: ageRule ? ageRule.maxAge : 999
+            });
+          }
+
+          const weightKey = `${weightName}-${gender}`;
+          if (!weightCatMap.has(weightKey) && !newWeightCatsToInsert.some(c => c.name === weightName && c.gender === gender)) {
+            newWeightCatsToInsert.push({
+              championship_id: selectedChampId,
+              name: weightName,
+              gender: gender,
+              min_weight: 0,
+              max_weight: 0
+            });
+          }
+        });
+
+        // Bulk insert missing Age categories
+        if (newAgeCatsToInsert.length > 0) {
+          const { data: insertedAgeCats, error: ageInsertErr } = await supabase
+            .from("age_categories")
+            .insert(newAgeCatsToInsert)
+            .select("id, name");
+          if (ageInsertErr) throw ageInsertErr;
+          insertedAgeCats?.forEach(c => ageCatMap.set(c.name, c.id));
+        }
+
+        // Bulk insert missing Weight categories
+        if (newWeightCatsToInsert.length > 0) {
+          const { data: insertedWeightCats, error: weightInsertErr } = await supabase
+            .from("weight_categories")
+            .insert(newWeightCatsToInsert)
+            .select("id, name, gender");
+          if (weightInsertErr) throw weightInsertErr;
+          insertedWeightCats?.forEach(c => weightCatMap.set(`${c.name}-${c.gender.toLowerCase()}`, c.id));
+        }
+
+        // 3. Bulk insert profiles
+        const profilesToInsert = classifiedFighters.map(({ f, fighterId }) => ({
+          id: fighterId,
+          full_name: f.name
+        }));
+
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < profilesToInsert.length; i += CHUNK_SIZE) {
+          const chunkProfiles = profilesToInsert.slice(i, i + CHUNK_SIZE);
+          const { error: profileErr } = await supabase.from("profiles").insert(chunkProfiles);
+          if (profileErr) throw profileErr;
+        }
+
+        // 4. Bulk insert registrations
+        const registrationsToInsert = classifiedFighters.map(({ f, fighterId, classification }) => {
+          const ageCatId = ageCatMap.get(classification.age_category);
+          const weightCatId = weightCatMap.get(`${classification.weight_category}-${f.gender.toLowerCase()}`);
+          return {
+            championship_id: selectedChampId,
+            fighter_id: fighterId,
+            age_category_id: ageCatId,
+            weight_category_id: weightCatId,
+            gender: f.gender.toLowerCase(),
+            weight_kg: f.weight,
+            status: "approved",
+            date_of_birth: new Date(new Date().getFullYear() - f.age, 0, 1).toISOString().split("T")[0]
+          };
+        });
+
+        for (let i = 0; i < registrationsToInsert.length; i += CHUNK_SIZE) {
+          const chunkRegs = registrationsToInsert.slice(i, i + CHUNK_SIZE);
+          const { error: regErr } = await supabase.from("registrations").insert(chunkRegs);
+          if (regErr) throw regErr;
+          successCount += chunkRegs.length;
+        }
+
+        alert(`✅ Imported ${successCount} fighters successfully! Categories auto-assigned by WAK-1F rules.`);
+        setXlsxPreview([]);
+        setXlsxFileName("");
+        setRefreshKey(prev => prev + 1);
+      }
     } catch (err: any) {
       alert("Import error: " + err.message);
     } finally {
