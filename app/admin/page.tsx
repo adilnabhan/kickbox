@@ -1411,7 +1411,11 @@ export default function AdminPage() {
 
 
   async function handleXLSXImport() {
-    if (!xlsxPreview.length || !selectedChampId) return;
+    if (!xlsxPreview.length) return;
+    if (!selectedChampId) {
+      alert("No active championship selected! Please go to the 'Championships' tab and create or select a championship first.");
+      return;
+    }
     setXlsxImporting(true);
     try {
       let successCount = 0;
@@ -1993,6 +1997,12 @@ export default function AdminPage() {
                     <div>
                       <h3 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)' }}>Upload Fighter Excel (XLSX)</h3>
                       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px' }}>Columns: Name, Age, Gender, Weight (kg), Club, Coach — categories auto-assigned by WAK-1F rules</p>
+                      {!selectedChampId && (
+                        <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.15)', padding: '6px 12px', borderRadius: '6px', color: 'var(--neo-red)', fontSize: '12px', fontWeight: 'bold' }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--neo-red)' }}>warning</span>
+                          No active championship selected. Go to the "Championships" tab to create or select one first.
+                        </div>
+                      )}
                     </div>
                     <label style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--neo-red)', color: 'white', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.04em' }}>
                       <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
@@ -2011,7 +2021,21 @@ export default function AdminPage() {
                           <button onClick={() => { setXlsxPreview([]); setXlsxFileName(""); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
                             Discard
                           </button>
-                          <button onClick={handleXLSXImport} disabled={xlsxImporting || !selectedChampId} style={{ background: 'var(--success-green)', color: 'white', border: 'none', padding: '6px 18px', borderRadius: '6px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', opacity: xlsxImporting ? 0.6 : 1 }}>
+                          <button 
+                            onClick={handleXLSXImport} 
+                            disabled={xlsxImporting} 
+                            style={{ 
+                              background: !selectedChampId ? 'rgba(255,255,255,0.08)' : 'var(--success-green)', 
+                              color: !selectedChampId ? 'var(--text-secondary)' : 'white', 
+                              border: 'none', 
+                              padding: '6px 18px', 
+                              borderRadius: '6px', 
+                              fontSize: '13px', 
+                              fontWeight: '700', 
+                              cursor: !selectedChampId ? 'not-allowed' : 'pointer', 
+                              opacity: xlsxImporting ? 0.6 : 1 
+                            }}
+                          >
                             {xlsxImporting ? "Importing…" : `✓ Import ${xlsxPreview.length} Fighters`}
                           </button>
                         </div>
