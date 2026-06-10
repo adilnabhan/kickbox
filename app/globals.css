@@ -1188,3 +1188,13 @@ body {
     flex-direction: column;
   }
 }
+
+/* Sleek clickable fighter slots in bracket matches */
+.fighter-slot-clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.fighter-slot-clickable:hover {
+  background-color: rgba(52, 199, 89, 0.12) !important;
+}
+

@@ -2117,7 +2117,13 @@ export default function AdminPage() {
               <div className="column-title-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
                 <div>
                   <h2 className="column-title">Ringside Scorekeeper Desk</h2>
-                  <p className="column-subtitle">Control and record outcomes for scheduled bracket matches</p>
+                  <p className="column-subtitle" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    Control and record outcomes for scheduled bracket matches
+                    <span style={{ fontSize: '11px', color: 'var(--success-green)', display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(52,199,89,0.08)', padding: '3px 10px', borderRadius: '12px', border: '1px solid rgba(52,199,89,0.15)', fontWeight: 'bold' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>info</span>
+                      💡 Click any fighter in a match to record winner
+                    </span>
+                  </p>
                 </div>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                   {matches.length > 0 && (() => {
@@ -2392,7 +2398,7 @@ export default function AdminPage() {
                         roundMap[m.round_name] = { total: 0, done: 0 };
                       }
                       roundMap[m.round_name].total += 1;
-                      if (m.status === "completed") {
+                      if (m.status === "completed" || m.status === "walkover") {
                         roundMap[m.round_name].done += 1;
                       }
                     });
@@ -2453,7 +2459,7 @@ export default function AdminPage() {
                       (ROUND_ORDER[a.round_name] ?? 99) - (ROUND_ORDER[b.round_name] ?? 99) ||
                       a.match_number - b.match_number
                     );
-                    const doneCount = catMatches.filter(m => m.status === "completed").length;
+                    const doneCount = catMatches.filter(m => m.status === "completed" || m.status === "walkover").length;
                     const totalCount = catMatches.length;
                     const allDone = doneCount === totalCount;
 
@@ -2529,10 +2535,10 @@ export default function AdminPage() {
                                       {roundMatches.map((match) => {
                                         const fighterAName = getFighterLabel(match, 'a');
                                         const fighterBName = getFighterLabel(match, 'b');
-                                        const isCompleted = match.status === "completed";
+                                        const isCompleted = match.status === "completed" || match.status === "walkover";
                                         const isLive = match.status === "live" || match.status === "ongoing";
-                                        const winA = match.winner_id === match.fighter_a_id;
-                                        const winB = match.winner_id === match.fighter_b_id;
+                                        const winA = !!match.winner_id && match.winner_id === match.fighter_a_id;
+                                        const winB = !!match.winner_id && match.winner_id === match.fighter_b_id;
 
                                         return (
                                           <div
@@ -2561,6 +2567,14 @@ export default function AdminPage() {
                                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                                               {/* Fighter A */}
                                               <div
+                                                onClick={() => {
+                                                  if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                                    if (confirm(`Mark ${fighterAName} as the winner of Match #${match.match_number}?`)) {
+                                                      handleRecordWinner(match.id, match.fighter_a_id);
+                                                    }
+                                                  }
+                                                }}
+                                                className={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}
                                                 style={{
                                                   display: 'flex',
                                                   alignItems: 'center',
@@ -2569,6 +2583,7 @@ export default function AdminPage() {
                                                   background: winA ? 'rgba(52,199,89,0.05)' : 'transparent',
                                                   borderBottom: '1px solid rgba(255,255,255,0.03)'
                                                 }}
+                                                title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
                                               >
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                                                   <img
@@ -2585,6 +2600,14 @@ export default function AdminPage() {
 
                                               {/* Fighter B */}
                                               <div
+                                                onClick={() => {
+                                                  if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                                    if (confirm(`Mark ${fighterBName} as the winner of Match #${match.match_number}?`)) {
+                                                      handleRecordWinner(match.id, match.fighter_b_id);
+                                                    }
+                                                  }
+                                                }}
+                                                className={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}
                                                 style={{
                                                   display: 'flex',
                                                   alignItems: 'center',
@@ -2592,6 +2615,7 @@ export default function AdminPage() {
                                                   padding: '10px 12px',
                                                   background: winB ? 'rgba(52,199,89,0.05)' : 'transparent'
                                                 }}
+                                                title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
                                               >
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                                                   <img
@@ -2606,24 +2630,6 @@ export default function AdminPage() {
                                                 {winB && <span className="material-symbols-outlined" style={{ fontSize: '15px', color: 'var(--success-green)' }}>emoji_events</span>}
                                               </div>
                                             </div>
-
-                                            {/* Quick Winner Selection Footer (only if pending and active) */}
-                                            {!isCompleted && match.fighter_a_id && match.fighter_b_id && (
-                                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: 'rgba(255,255,255,0.05)', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                                                <button
-                                                  onClick={() => handleRecordWinner(match.id, match.fighter_a_id)}
-                                                  style={{ padding: '6px 4px', fontSize: '10px', background: 'rgba(255,255,255,0.02)', border: 'none', cursor: 'pointer', textAlign: 'center', fontWeight: 'bold', color: 'var(--success-green)' }}
-                                                >
-                                                  {fighterAName.split(" ")[0]} Wins
-                                                </button>
-                                                <button
-                                                  onClick={() => handleRecordWinner(match.id, match.fighter_b_id)}
-                                                  style={{ padding: '6px 4px', fontSize: '10px', background: 'rgba(255,255,255,0.02)', border: 'none', cursor: 'pointer', textAlign: 'center', fontWeight: 'bold', color: 'var(--success-green)' }}
-                                                >
-                                                  {fighterBName.split(" ")[0]} Wins
-                                                </button>
-                                              </div>
-                                            )}
                                           </div>
                                         );
                                       })}
@@ -2638,7 +2644,7 @@ export default function AdminPage() {
                             const fighterAName = getFighterLabel(match, 'a');
                             const fighterBName = getFighterLabel(match, 'b');
                             const winnerName = match.winner_id === match.fighter_a_id ? fighterAName : fighterBName;
-                            const isCompleted = match.status === "completed";
+                            const isCompleted = match.status === "completed" || match.status === "walkover";
                             const ringLabel = match.ring_number?.split(" | CATEGORY:")[0] || "Ring 1";
 
                             return (
@@ -2648,22 +2654,60 @@ export default function AdminPage() {
                                 </div>
                                 
                                 <div className="fighter-pairing" style={{ flex: 1.5 }}>
-                                  <div className="fighter-details">
+                                  {/* Fighter A details card */}
+                                  <div
+                                    onClick={() => {
+                                      if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                        if (confirm(`Mark ${fighterAName} as the winner of Match #${match.match_number}?`)) {
+                                          handleRecordWinner(match.id, match.fighter_a_id);
+                                        }
+                                      }
+                                    }}
+                                    className={`fighter-details ${(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}`}
+                                    style={{
+                                      padding: '8px 12px',
+                                      borderRadius: '6px',
+                                      background: (!!match.winner_id && match.winner_id === match.fighter_a_id) ? 'rgba(52,199,89,0.08)' : 'transparent',
+                                    }}
+                                    title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
+                                  >
                                     <div className="fighter-pic">
                                       <img src={getFighterAvatar(match.fighter_a_id || undefined)} alt={fighterAName} />
                                     </div>
                                     <div className="fighter-info">
-                                      <strong style={{ color: match.winner_id === match.fighter_a_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterAName}</strong>
+                                      <strong style={{ color: (!!match.winner_id && match.winner_id === match.fighter_a_id) ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterAName}</strong>
                                       <small>{getFighterRegistrationDetails(match.fighter_a_id || undefined) || ""}</small>
                                     </div>
+                                    {!!match.winner_id && match.winner_id === match.fighter_a_id && (
+                                      <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--success-green)', marginLeft: '8px' }}>emoji_events</span>
+                                    )}
                                   </div>
                                   <div className="vs-divider">VS</div>
-                                  <div className="fighter-details right">
+                                  {/* Fighter B details card */}
+                                  <div
+                                    onClick={() => {
+                                      if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                        if (confirm(`Mark ${fighterBName} as the winner of Match #${match.match_number}?`)) {
+                                          handleRecordWinner(match.id, match.fighter_b_id);
+                                        }
+                                      }
+                                    }}
+                                    className={`fighter-details right ${(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}`}
+                                    style={{
+                                      padding: '8px 12px',
+                                      borderRadius: '6px',
+                                      background: (!!match.winner_id && match.winner_id === match.fighter_b_id) ? 'rgba(52,199,89,0.08)' : 'transparent',
+                                    }}
+                                    title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
+                                  >
+                                    {!!match.winner_id && match.winner_id === match.fighter_b_id && (
+                                      <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--success-green)', marginRight: '8px' }}>emoji_events</span>
+                                    )}
                                     <div className="fighter-pic">
                                       <img src={getFighterAvatar(match.fighter_b_id || undefined)} alt={fighterBName} />
                                     </div>
                                     <div className="fighter-info">
-                                      <strong style={{ color: match.winner_id === match.fighter_b_id ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterBName}</strong>
+                                      <strong style={{ color: (!!match.winner_id && match.winner_id === match.fighter_b_id) ? 'var(--success-green)' : 'var(--text-primary)' }}>{fighterBName}</strong>
                                       <small>{getFighterRegistrationDetails(match.fighter_b_id || undefined) || ""}</small>
                                     </div>
                                   </div>
@@ -2682,21 +2726,8 @@ export default function AdminPage() {
                                       {winnerName} → {getAdvanceRoundText(match.id)}
                                     </span>
                                   ) : (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
-                                      <button
-                                        onClick={() => handleRecordWinner(match.id, match.fighter_a_id)}
-                                        disabled={!match.fighter_a_id || !match.fighter_b_id}
-                                        style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
-                                      >
-                                        ✓ {fighterAName.startsWith("Waiting") || fighterAName.startsWith("TBD") ? "A" : fighterAName.split(" ")[0]} Wins
-                                      </button>
-                                      <button
-                                        onClick={() => handleRecordWinner(match.id, match.fighter_b_id)}
-                                        disabled={!match.fighter_a_id || !match.fighter_b_id}
-                                        style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '700', background: 'rgba(52,199,89,0.12)', color: 'var(--success-green)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: (!match.fighter_a_id || !match.fighter_b_id) ? 0.4 : 1 }}
-                                      >
-                                        ✓ {fighterBName.startsWith("Waiting") || fighterBName.startsWith("TBD") ? "B" : fighterBName.split(" ")[0]} Wins
-                                      </button>
+                                    <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                                      {match.fighter_a_id && match.fighter_b_id ? "💡 Click fighter to select winner." : "Waiting for opponents..."}
                                     </div>
                                   )}
                                 </div>
