@@ -2480,7 +2480,36 @@ export default function AdminPage() {
                   });
 
                   return filteredGroups.map(([catKey, catMatches]) => {
-                    const catMatchesToShow = catMatches.filter(m => m.fighter_a_id && m.fighter_b_id);
+                    const ROUND_ORDER_LIST = [
+                      "Round 1", "Round 2", "Round 3", "Round 4", "Round 5", "Round 6",
+                      "Quarter Final", "Semi Final", "Final"
+                    ];
+                    const getRoundIndex = (roundName: string): number => {
+                      const idx = ROUND_ORDER_LIST.indexOf(roundName);
+                      if (idx !== -1) return idx;
+                      if (roundName.startsWith("Round ")) {
+                        const num = parseInt(roundName.split(" ")[1]);
+                        if (!isNaN(num)) return num - 1;
+                      }
+                      return 99;
+                    };
+
+                    let activeRoundName = "Final";
+                    for (const rName of ROUND_ORDER_LIST) {
+                      const roundMatches = catMatches.filter(m => m.round_name === rName && m.status !== "walkover");
+                      if (roundMatches.length > 0 && roundMatches.some(m => m.status !== "completed")) {
+                        activeRoundName = rName;
+                        break;
+                      }
+                    }
+                    const activeRoundIdx = getRoundIndex(activeRoundName);
+
+                    const catMatchesToShow = catMatches.filter(m => {
+                      if (m.status === "walkover") return false;
+                      const mIdx = getRoundIndex(m.round_name);
+                      return mIdx <= activeRoundIdx;
+                    });
+
                     const sortedMatches = [...catMatchesToShow].sort((a, b) =>
                       (ROUND_ORDER[a.round_name] ?? 99) - (ROUND_ORDER[b.round_name] ?? 99) ||
                       a.match_number - b.match_number

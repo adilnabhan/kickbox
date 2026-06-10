@@ -59,15 +59,64 @@ export default function Home() {
             id,
             ring_number,
             round_name,
+            status,
             scheduled_at,
+            fighter_a_id,
+            fighter_b_id,
             fighter_a:fighter_a_id (full_name),
             fighter_b:fighter_b_id (full_name)
           `)
           .order("scheduled_at", { ascending: true });
         if (matchError) throw matchError;
         
-        const filteredMatches = (matchData || []).filter((m: any) => m.fighter_a && m.fighter_b);
-        setMatches(filteredMatches);
+        const ROUND_ORDER_LIST = [
+          "Round 1", "Round 2", "Round 3", "Round 4", "Round 5", "Round 6",
+          "Quarter Final", "Semi Final", "Final"
+        ];
+        const getRoundIndex = (roundName: string): number => {
+          const idx = ROUND_ORDER_LIST.indexOf(roundName);
+          if (idx !== -1) return idx;
+          if (roundName.startsWith("Round ")) {
+            const num = parseInt(roundName.split(" ")[1]);
+            if (!isNaN(num)) return num - 1;
+          }
+          return 99;
+        };
+
+        const catGroups: { [key: string]: any[] } = {};
+        (matchData || []).forEach((m: any) => {
+          const catKey = m.ring_number?.split(" | CATEGORY:")[1] || "General";
+          if (!catGroups[catKey]) catGroups[catKey] = [];
+          catGroups[catKey].push(m);
+        });
+
+        const filteredList: any[] = [];
+        let activeMatchesCount = 0;
+
+        Object.values(catGroups).forEach(catMatches => {
+          let activeRoundName = "Final";
+          for (const rName of ROUND_ORDER_LIST) {
+            const roundMatches = catMatches.filter(m => m.round_name === rName && m.status !== "walkover");
+            if (roundMatches.length > 0 && roundMatches.some(m => m.status !== "completed")) {
+              activeRoundName = rName;
+              break;
+            }
+          }
+          const activeRoundIdx = getRoundIndex(activeRoundName);
+
+          catMatches.forEach(m => {
+            if (m.status === "walkover") return;
+            const mIdx = getRoundIndex(m.round_name);
+            if (mIdx <= activeRoundIdx) {
+              filteredList.push(m);
+              if (m.fighter_a_id && m.fighter_b_id) {
+                activeMatchesCount++;
+              }
+            }
+          });
+        });
+
+        setMatches(filteredList);
 
         // 4. Fetch Stats counts
         const { count: totalFightersCount } = await supabase
@@ -84,11 +133,6 @@ export default function Home() {
           .from("registrations")
           .select("id", { count: "exact", head: true })
           .eq("status", "pending");
-
-        const { data: matchesList } = await supabase
-          .from("matches")
-          .select("id, fighter_a_id, fighter_b_id");
-        const activeMatchesCount = (matchesList || []).filter((m: any) => m.fighter_a_id && m.fighter_b_id).length;
 
         setStats({
           totalFighters: totalFightersCount || 0,
