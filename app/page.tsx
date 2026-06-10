@@ -65,7 +65,9 @@ export default function Home() {
           `)
           .order("scheduled_at", { ascending: true });
         if (matchError) throw matchError;
-        setMatches(matchData || []);
+        
+        const filteredMatches = (matchData || []).filter((m: any) => m.fighter_a && m.fighter_b);
+        setMatches(filteredMatches);
 
         // 4. Fetch Stats counts
         const { count: totalFightersCount } = await supabase
@@ -83,15 +85,16 @@ export default function Home() {
           .select("id", { count: "exact", head: true })
           .eq("status", "pending");
 
-        const { count: matchesCount } = await supabase
+        const { data: matchesList } = await supabase
           .from("matches")
-          .select("id", { count: "exact", head: true });
+          .select("id, fighter_a_id, fighter_b_id");
+        const activeMatchesCount = (matchesList || []).filter((m: any) => m.fighter_a_id && m.fighter_b_id).length;
 
         setStats({
           totalFighters: totalFightersCount || 0,
           approved: approvedCount || 0,
           pending: pendingCount || 0,
-          activeMatches: matchesCount || 0
+          activeMatches: activeMatchesCount
         });
 
       } catch (err) {

@@ -2414,15 +2414,16 @@ export default function AdminPage() {
 
                   // Progress bar helper for visual state
                   function renderCategoryProgressBar(catMatchesList: typeof matches) {
+                    const activeMatchesList = catMatchesList.filter(m => m.fighter_a_id && m.fighter_b_id);
                     const roundMap: Record<string, { total: number; done: number }> = {};
                     const roundNamesOrder = ["Round 1", "Round 2", "Round 3", "Round 4", "Quarter Final", "Semi Final", "Final"];
                     
-                    catMatchesList.forEach(m => {
+                    activeMatchesList.forEach(m => {
                       if (!roundMap[m.round_name]) {
                         roundMap[m.round_name] = { total: 0, done: 0 };
                       }
                       roundMap[m.round_name].total += 1;
-                      if (m.status === "completed" || m.status === "walkover") {
+                      if (m.status === "completed") {
                         roundMap[m.round_name].done += 1;
                       }
                     });
@@ -2479,13 +2480,14 @@ export default function AdminPage() {
                   });
 
                   return filteredGroups.map(([catKey, catMatches]) => {
-                    const sortedMatches = [...catMatches].sort((a, b) =>
+                    const catMatchesToShow = catMatches.filter(m => m.fighter_a_id && m.fighter_b_id);
+                    const sortedMatches = [...catMatchesToShow].sort((a, b) =>
                       (ROUND_ORDER[a.round_name] ?? 99) - (ROUND_ORDER[b.round_name] ?? 99) ||
                       a.match_number - b.match_number
                     );
-                    const doneCount = catMatches.filter(m => m.status === "completed" || m.status === "walkover").length;
-                    const totalCount = catMatches.length;
-                    const allDone = doneCount === totalCount;
+                    const doneCount = catMatchesToShow.filter(m => m.status === "completed").length;
+                    const totalCount = catMatchesToShow.length;
+                    const allDone = doneCount === totalCount && totalCount > 0;
 
                     return (
                       <div key={catKey} style={{ marginBottom: '24px', background: 'var(--slate)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' }}>
@@ -2499,7 +2501,7 @@ export default function AdminPage() {
                                   {getDivisionLabel(catKey)}
                                 </div>
                                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                                  {totalCount} matches · {catMatches.filter(m => m.fighter_a_id || m.fighter_b_id).length} active fighter slots
+                                  {totalCount} matches
                                 </div>
                               </div>
                             </div>
@@ -2514,13 +2516,13 @@ export default function AdminPage() {
                           </div>
 
                           {/* Visual Progress Bar */}
-                          {renderCategoryProgressBar(catMatches)}
+                          {renderCategoryProgressBar(catMatchesToShow)}
                         </div>
 
                         {/* Matches in this category */}
                         {matchViewMode === "bracket" ? (() => {
                           const roundGroups: { [key: string]: typeof catMatches } = {};
-                          catMatches.forEach(m => {
+                          catMatchesToShow.forEach(m => {
                             const rName = m.round_name || "General";
                             if (!roundGroups[rName]) roundGroups[rName] = [];
                             roundGroups[rName].push(m);
