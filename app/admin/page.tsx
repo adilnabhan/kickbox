@@ -612,6 +612,56 @@ export default function AdminPage() {
         const numFighters = groupFighters.length;
         if (numFighters < 2) continue;
 
+        if (numFighters === 3) {
+          // Special 3-Participant Custom Bracket
+          const F1 = groupFighters[0].fighter_id;
+          const F2 = groupFighters[1].fighter_id;
+          const F3 = groupFighters[2].fighter_id;
+
+          const match1 = {
+            championship_id: selectedChampId,
+            match_number: -1,
+            round_name: "Semi Final",
+            fighter_a_id: F1,
+            fighter_b_id: F2,
+            winner_id: null,
+            status: "scheduled",
+            ring_number: `Ring ${(globalMatchCounter % 2) + 1} | CATEGORY:${key}`,
+            scheduled_at: new Date(Date.now() + (globalMatchCounter + 1 * 60) * 20 * 60000).toISOString()
+          };
+
+          const match2 = {
+            championship_id: selectedChampId,
+            match_number: -1,
+            round_name: "Semi Final",
+            fighter_a_id: null, // waits for loser of Match 1
+            fighter_b_id: F3,
+            winner_id: null,
+            status: "scheduled",
+            ring_number: `Ring ${(globalMatchCounter % 2) + 1} | CATEGORY:${key}`,
+            scheduled_at: new Date(Date.now() + (globalMatchCounter + 2 * 60) * 20 * 60000).toISOString()
+          };
+
+          const finalMatch = {
+            championship_id: selectedChampId,
+            match_number: -1,
+            round_name: "Final",
+            fighter_a_id: null, // waits for winner of Match 1
+            fighter_b_id: null, // waits for winner of Match 2
+            winner_id: null,
+            status: "scheduled",
+            ring_number: `Ring ${(globalMatchCounter % 2) + 1} | CATEGORY:${key}`,
+            scheduled_at: new Date(Date.now() + (globalMatchCounter + 3 * 60) * 20 * 60000).toISOString()
+          };
+
+          const groupMatches = [match1, match2, finalMatch];
+          groupMatches.forEach((m) => {
+            m.match_number = globalMatchCounter++;
+            matchesToInsert.push(m);
+          });
+          continue; // skip standard seeding for this category
+        }
+
         // Next power of 2 = total bracket slots
         let P = 2;
         while (P < numFighters) P *= 2;
@@ -833,6 +883,50 @@ export default function AdminPage() {
         const siblingMatches = localMatches
           .filter((m: any) => m.championship_id === currentMatch.championship_id && (m.ring_number?.split(" | CATEGORY:")[1] || "") === categoryPart)
           .sort((a: any, b: any) => a.match_number - b.match_number);
+
+        // Custom 3-Participant Progression Rule
+        const categoryRegs = registrations.filter(r => 
+          r.championship_id === currentMatch.championship_id && 
+          r.status === "approved" && 
+          `${r.age_category_id}-${r.weight_category_id}-${r.gender.toLowerCase()}` === categoryPart.toLowerCase()
+        );
+
+        if (categoryRegs.length === 3 && siblingMatches.length === 3) {
+          const match1 = siblingMatches[0];
+          const match2 = siblingMatches[1];
+          const finalMatch = siblingMatches[2];
+
+          if (currentMatch.id === match1.id) {
+            const loserId = winnerId === match1.fighter_a_id ? match1.fighter_b_id : match1.fighter_a_id;
+            const loserName = registrations.find(r => r.fighter_id === loserId)?.profiles?.full_name || "Loser";
+            const winnerName = registrations.find(r => r.fighter_id === winnerId)?.profiles?.full_name || "Winner";
+            
+            const m2Idx = localMatches.findIndex((m: any) => m.id === match2.id);
+            if (m2Idx !== -1) {
+              localMatches[m2Idx].fighter_a_id = loserId;
+              localMatches[m2Idx].fighter_a = { id: loserId, full_name: loserName };
+            }
+            
+            const fIdx = localMatches.findIndex((m: any) => m.id === finalMatch.id);
+            if (fIdx !== -1) {
+              localMatches[fIdx].fighter_a_id = winnerId;
+              localMatches[fIdx].fighter_a = { id: winnerId, full_name: winnerName };
+            }
+          } else if (currentMatch.id === match2.id) {
+            const winnerName = registrations.find(r => r.fighter_id === winnerId)?.profiles?.full_name || "Winner";
+            
+            const fIdx = localMatches.findIndex((m: any) => m.id === finalMatch.id);
+            if (fIdx !== -1) {
+              localMatches[fIdx].fighter_b_id = winnerId;
+              localMatches[fIdx].fighter_b = { id: winnerId, full_name: winnerName };
+            }
+          }
+
+          localStorage.setItem("kickbox_matches", JSON.stringify(localMatches));
+          alert("Winner recorded and bracket updated!");
+          setRefreshKey((prev) => prev + 1);
+          return;
+        }
           
         const currentIndex = siblingMatches.findIndex((m: any) => m.id === matchId);
         if (currentIndex !== -1) {
@@ -918,6 +1012,31 @@ export default function AdminPage() {
         const siblingMatches = allSiblingMatches
           .filter((m) => (m.ring_number?.split(" | CATEGORY:")[1] || "") === categoryPart)
           .sort((a, b) => a.match_number - b.match_number);
+
+        // Custom 3-Participant Progression Rule
+        const categoryRegs = registrations.filter(r => 
+          r.championship_id === currentMatch.championship_id && 
+          r.status === "approved" && 
+          `${r.age_category_id}-${r.weight_category_id}-${r.gender.toLowerCase()}` === categoryPart.toLowerCase()
+        );
+
+        if (categoryRegs.length === 3 && siblingMatches.length === 3) {
+          const match1 = siblingMatches[0];
+          const match2 = siblingMatches[1];
+          const finalMatch = siblingMatches[2];
+
+          if (currentMatch.id === match1.id) {
+            const loserId = winnerId === match1.fighter_a_id ? match1.fighter_b_id : match1.fighter_a_id;
+            await supabase.from("matches").update({ fighter_a_id: loserId }).eq("id", match2.id);
+            await supabase.from("matches").update({ fighter_a_id: winnerId }).eq("id", finalMatch.id);
+          } else if (currentMatch.id === match2.id) {
+            await supabase.from("matches").update({ fighter_b_id: winnerId }).eq("id", finalMatch.id);
+          }
+
+          alert("Winner recorded and bracket updated!");
+          setRefreshKey((prev) => prev + 1);
+          return;
+        }
 
         const currentIndex = siblingMatches.findIndex((m) => m.id === matchId);
         if (currentIndex !== -1) {
