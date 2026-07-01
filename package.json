@@ -2,11 +2,15 @@
   "name": "kickbox",
   "version": "0.1.0",
   "private": true,
+  "main": "main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "electron:start": "electron .",
+    "electron:pack": "electron-builder --dir",
+    "electron:dist": "electron-builder"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -19,8 +23,20 @@
     "@types/node": "^20.16.11",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.15",
     "typescript": "^5.6.3"
+  },
+  "build": {
+    "appId": "com.kickbox.management",
+    "productName": "Kickboxing Tournament OS",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    }
   }
 }
