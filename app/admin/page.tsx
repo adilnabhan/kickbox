@@ -3409,7 +3409,7 @@ export default function AdminPage() {
                     }
 
                     // First round with no fighter_id is a Bye/TBD
-                    if (roundIdx <= 0) return "TBD (Bye)";
+                    if (roundIdx <= 0) return "BYE";
 
                     // Subsequent rounds have feeder matches in the previous round
                     const offset = currentIndex - roundStarts[roundIdx];
@@ -3604,10 +3604,9 @@ export default function AdminPage() {
                           {renderCategoryProgressBar(catMatchesToShow)}
                         </div>
 
-                        {/* Matches in this category */}
                         {matchViewMode === "bracket" ? (() => {
                           const roundGroups: { [key: string]: typeof catMatches } = {};
-                          catMatchesToShow.forEach(m => {
+                          catMatches.forEach(m => {
                             const rName = m.round_name || "General";
                             if (!roundGroups[rName]) roundGroups[rName] = [];
                             roundGroups[rName].push(m);
@@ -3615,10 +3614,13 @@ export default function AdminPage() {
 
                           function getRoundPriority(roundName: string): number {
                             const name = roundName.toLowerCase();
-                            if (name.includes("round 1") || name.includes("round of 16")) return 1;
-                            if (name.includes("quarter") || name.includes("qf")) return 2;
-                            if (name.includes("semi") || name.includes("sf")) return 3;
-                            if (name.includes("final")) return 4;
+                            if (name.includes("round 1") || name.includes("round of 128")) return 1;
+                            if (name.includes("round 2") || name.includes("round of 64")) return 2;
+                            if (name.includes("round 3") || name.includes("round of 32")) return 3;
+                            if (name.includes("round 4") || name.includes("round of 16")) return 4;
+                            if (name.includes("quarter") || name.includes("qf")) return 5;
+                            if (name.includes("semi") || name.includes("sf")) return 6;
+                            if (name.includes("final")) return 7;
                             return 99;
                           }
 
