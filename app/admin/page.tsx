@@ -728,7 +728,7 @@ export default function AdminPage() {
           }
         }
 
-        /*
+
         // Helper to check if a match at a flat index has any active fighters in its subtree
         const hasFightersInSubtree = (idx: number): boolean => {
           if (idx < firstRoundSize) {
@@ -812,7 +812,7 @@ export default function AdminPage() {
           }
         }
 
-        */
+
         // ── Assign global match numbers ───────────────────────────────────
         groupMatches.forEach((m) => {
           m.match_number = globalMatchCounter++;
@@ -3683,13 +3683,14 @@ export default function AdminPage() {
                                               {/* Fighter A */}
                                               <div
                                                 onClick={() => {
-                                                  if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                                  const isFighterBBye = !match.fighter_b_id && getFighterLabel(match, 'b') === "BYE";
+                                                  if (!isCompleted && match.fighter_a_id && (match.fighter_b_id || isFighterBBye)) {
                                                     if (confirm(`Mark ${fighterAName} as the winner of Match #${match.match_number}?`)) {
                                                       handleRecordWinner(match.id, match.fighter_a_id);
                                                     }
                                                   }
                                                 }}
-                                                className={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}
+                                                className={(!isCompleted && match.fighter_a_id && (match.fighter_b_id || (!match.fighter_b_id && getFighterLabel(match, 'b') === "BYE"))) ? "fighter-slot-clickable" : ""}
                                                 style={{
                                                   display: 'flex',
                                                   alignItems: 'center',
@@ -3698,7 +3699,7 @@ export default function AdminPage() {
                                                   background: winA ? 'rgba(52,199,89,0.05)' : 'transparent',
                                                   borderBottom: '1px solid rgba(255,255,255,0.03)'
                                                 }}
-                                                title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
+                                                title={(!isCompleted && match.fighter_a_id && (match.fighter_b_id || (!match.fighter_b_id && getFighterLabel(match, 'b') === "BYE"))) ? "Click to set as winner" : ""}
                                               >
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                                                   <img
@@ -3716,13 +3717,14 @@ export default function AdminPage() {
                                               {/* Fighter B */}
                                               <div
                                                 onClick={() => {
-                                                  if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                                  const isFighterABye = !match.fighter_a_id && getFighterLabel(match, 'a') === "BYE";
+                                                  if (!isCompleted && match.fighter_b_id && (match.fighter_a_id || isFighterABye)) {
                                                     if (confirm(`Mark ${fighterBName} as the winner of Match #${match.match_number}?`)) {
                                                       handleRecordWinner(match.id, match.fighter_b_id);
                                                     }
                                                   }
                                                 }}
-                                                className={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}
+                                                className={(!isCompleted && match.fighter_b_id && (match.fighter_a_id || (!match.fighter_a_id && getFighterLabel(match, 'a') === "BYE"))) ? "fighter-slot-clickable" : ""}
                                                 style={{
                                                   display: 'flex',
                                                   alignItems: 'center',
@@ -3730,7 +3732,7 @@ export default function AdminPage() {
                                                   padding: '10px 12px',
                                                   background: winB ? 'rgba(52,199,89,0.05)' : 'transparent'
                                                 }}
-                                                title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
+                                                title={(!isCompleted && match.fighter_a_id && (match.fighter_b_id || (!match.fighter_b_id && getFighterLabel(match, 'b') === "BYE"))) ? "Click to set as winner" : ""}
                                               >
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                                                   <img
@@ -3772,19 +3774,20 @@ export default function AdminPage() {
                                   {/* Fighter A details card */}
                                   <div
                                     onClick={() => {
-                                      if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                      const isFighterBBye = !match.fighter_b_id && getFighterLabel(match, 'b') === "BYE";
+                                      if (!isCompleted && match.fighter_a_id && (match.fighter_b_id || isFighterBBye)) {
                                         if (confirm(`Mark ${fighterAName} as the winner of Match #${match.match_number}?`)) {
                                           handleRecordWinner(match.id, match.fighter_a_id);
                                         }
                                       }
                                     }}
-                                    className={`fighter-details ${(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}`}
+                                    className={`fighter-details ${(!isCompleted && match.fighter_a_id && (match.fighter_b_id || (!match.fighter_b_id && getFighterLabel(match, 'b') === "BYE"))) ? "fighter-slot-clickable" : ""}`}
                                     style={{
                                       padding: '8px 12px',
                                       borderRadius: '6px',
                                       background: (!!match.winner_id && match.winner_id === match.fighter_a_id) ? 'rgba(52,199,89,0.08)' : 'transparent',
                                     }}
-                                    title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
+                                    title={(!isCompleted && match.fighter_a_id && (match.fighter_b_id || (!match.fighter_b_id && getFighterLabel(match, 'b') === "BYE"))) ? "Click to set as winner" : ""}
                                   >
                                     <div className="fighter-pic">
                                       <img src={getFighterAvatar(match.fighter_a_id || undefined)} alt={fighterAName} />
@@ -3801,19 +3804,20 @@ export default function AdminPage() {
                                   {/* Fighter B details card */}
                                   <div
                                     onClick={() => {
-                                      if (!isCompleted && match.fighter_a_id && match.fighter_b_id) {
+                                      const isFighterABye = !match.fighter_a_id && getFighterLabel(match, 'a') === "BYE";
+                                      if (!isCompleted && match.fighter_b_id && (match.fighter_a_id || isFighterABye)) {
                                         if (confirm(`Mark ${fighterBName} as the winner of Match #${match.match_number}?`)) {
                                           handleRecordWinner(match.id, match.fighter_b_id);
                                         }
                                       }
                                     }}
-                                    className={`fighter-details right ${(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "fighter-slot-clickable" : ""}`}
+                                    className={`fighter-details right ${(!isCompleted && match.fighter_b_id && (match.fighter_a_id || (!match.fighter_a_id && getFighterLabel(match, 'a') === "BYE"))) ? "fighter-slot-clickable" : ""}`}
                                     style={{
                                       padding: '8px 12px',
                                       borderRadius: '6px',
                                       background: (!!match.winner_id && match.winner_id === match.fighter_b_id) ? 'rgba(52,199,89,0.08)' : 'transparent',
                                     }}
-                                    title={(!isCompleted && match.fighter_a_id && match.fighter_b_id) ? "Click to set as winner" : ""}
+                                    title={(!isCompleted && match.fighter_a_id && (match.fighter_b_id || (!match.fighter_b_id && getFighterLabel(match, 'b') === "BYE"))) ? "Click to set as winner" : ""}
                                   >
                                     {!!match.winner_id && match.winner_id === match.fighter_b_id && (
                                       <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--success-green)', marginRight: '8px' }}>emoji_events</span>
