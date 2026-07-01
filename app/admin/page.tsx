@@ -728,6 +728,7 @@ export default function AdminPage() {
           }
         }
 
+        /*
         // Helper to check if a match at a flat index has any active fighters in its subtree
         const hasFightersInSubtree = (idx: number): boolean => {
           if (idx < firstRoundSize) {
@@ -811,6 +812,7 @@ export default function AdminPage() {
           }
         }
 
+        */
         // ── Assign global match numbers ───────────────────────────────────
         groupMatches.forEach((m) => {
           m.match_number = globalMatchCounter++;
