@@ -4,6 +4,17 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { SupabaseStatus } from "@/components/SupabaseStatus";
 import { generateMatchPDF, classifyFighterLocal, WAK1F_AGE_CATEGORIES, MatchData, formatDivisionKey } from "@/lib/api";
+import {
+  printMatchSchedulePDF,
+  printCategoryBracketPDF,
+  printRoundWisePDF,
+  printRingWisePDF,
+  printCategoryWisePDF,
+  printCompetitorListPDF,
+  printWeighInSheetPDF,
+  printResultSheetPDF,
+  printTournamentSummaryPDF
+} from "@/lib/pdfReports";
 
 type Championship = {
   id: string;
@@ -24,6 +35,10 @@ type Registration = {
   status: string;
   gender: string;
   weight_kg: number;
+  date_of_birth?: string;
+  club_name?: string;
+  coach_name?: string;
+  address?: string;
   profiles?: { id: string; full_name: string };
   age_categories?: { name: string };
   weight_categories?: { name: string };
@@ -98,6 +113,42 @@ export default function AdminPage() {
   const [xlsxPreview, setXlsxPreview] = useState<any[]>([]);
   const [xlsxFileName, setXlsxFileName] = useState("");
   const [xlsxImporting, setXlsxImporting] = useState(false);
+  const [xlsxWarnings, setXlsxWarnings] = useState<string[]>([]);
+  const [isReportCenterOpen, setIsReportCenterOpen] = useState(false);
+
+  // Sub-tab for registrations
+  const [registrationsSubTab, setRegistrationsSubTab] = useState<"approvals" | "registry">("registry");
+
+  // Registry Search & Filter States
+  const [registrySearch, setRegistrySearch] = useState("");
+  const [registryFilterAge, setRegistryFilterAge] = useState("all");
+  const [registryFilterGender, setRegistryFilterGender] = useState("all");
+  const [registryFilterWeight, setRegistryFilterWeight] = useState("all");
+  const [registrySortColumn, setRegistrySortColumn] = useState("name");
+  const [registrySortOrder, setRegistrySortOrder] = useState<"asc" | "desc">("asc");
+  const [registryPage, setRegistryPage] = useState(1);
+  const [registryRowsPerPage, setRegistryRowsPerPage] = useState(10);
+  const [selectedRegistryIds, setSelectedRegistryIds] = useState<Set<string>>(new Set());
+
+  // Manual Participant Form States
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [editingRegId, setEditingRegId] = useState<string | null>(null);
+  const [manualRegNo, setManualRegNo] = useState("");
+  const [manualFullName, setManualFullName] = useState("");
+  const [manualDob, setManualDob] = useState("");
+  const [manualGender, setManualGender] = useState<"male" | "female">("male");
+  const [manualWeight, setManualWeight] = useState("");
+  const [manualHeight, setManualHeight] = useState("");
+  const [manualBeltLevel, setManualBeltLevel] = useState("");
+  const [manualClub, setManualClub] = useState("");
+  const [manualDistrict, setManualDistrict] = useState("");
+  const [manualState, setManualState] = useState("");
+  const [manualCoach, setManualCoach] = useState("");
+  const [manualContact, setManualContact] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
+  const [manualEmergency, setManualEmergency] = useState("");
+  const [manualMedical, setManualMedical] = useState("");
+  const [manualPhoto, setManualPhoto] = useState("");
 
   // Form States - Championships
   const [newChampName, setNewChampName] = useState("");
@@ -1314,6 +1365,7 @@ export default function AdminPage() {
     if (!file) return;
     setXlsxFileName(file.name);
     setXlsxPreview([]);
+    setXlsxWarnings([]);
 
     try {
       const XLSX = await import("xlsx");
@@ -1321,12 +1373,14 @@ export default function AdminPage() {
       const wb = XLSX.read(data, { type: "array" });
       
       const allNormalised: any[] = [];
+      const warnings: string[] = [];
+      const seenFighters = new Set<string>();
 
       wb.SheetNames.forEach(sheetName => {
         const ws = wb.Sheets[sheetName];
         const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
-        rows.forEach((row: any) => {
+        rows.forEach((row: any, rowIdx: number) => {
           const get = (...keys: string[]) => {
             for (const k of keys) {
               const cleanKey = k.toLowerCase().replace(/[\s_()\-]/g, "");
@@ -1343,7 +1397,12 @@ export default function AdminPage() {
 
           const name = String(get("fullname", "name", "fullName", "fighter_name", "fightername", "fightersname") || "").trim();
           if (!name || name.toLowerCase() === "name" || name.toLowerCase().includes("fighter id")) {
-            return; // Skip empty rows or header duplicate rows
+            return; // Skip empty rows
+          }
+
+          if (name.length < 2) {
+            warnings.push(`Row ${rowIdx + 2} in sheet "${sheetName}": Invalid name "${name}". Skipping.`);
+            return;
           }
 
           // Parse age category or age group (e.g. "9-10", "19+")
@@ -1365,7 +1424,12 @@ export default function AdminPage() {
             age = 9;
           } else {
             const parsed = parseInt(ageStr.replace(/[^0-9]/g, ""));
-            age = isNaN(parsed) ? 19 : parsed;
+            age = isNaN(parsed) ? 0 : parsed;
+          }
+
+          if (age <= 0 || age > 100) {
+            warnings.push(`Row ${rowIdx + 2} in sheet "${sheetName}": Missing or invalid age value "${ageVal}". Skipping.`);
+            return;
           }
 
           // Parse weight category or weight (e.g. "48", "51 kg")
@@ -1376,26 +1440,43 @@ export default function AdminPage() {
             weight = parseFloat(cleanWeightStr);
           }
           if (isNaN(weight) || weight <= 0) {
-            weight = 48; // fallback default
+            warnings.push(`Row ${rowIdx + 2} in sheet "${sheetName}": Missing or invalid weight value "${weightVal}". Skipping.`);
+            return;
           }
 
           // Parse gender (Male/Female)
           const genderVal = get("gender", "sex");
-          let gender = "Male"; // Default to Male if column not found
-          if (genderVal) {
-            const gStr = String(genderVal).trim().toLowerCase();
-            if (gStr === "f" || gStr === "female" || gStr.includes("girl") || gStr.includes("women") || gStr.includes("female")) {
-              gender = "Female";
-            }
+          if (!genderVal) {
+            warnings.push(`Row ${rowIdx + 2} in sheet "${sheetName}": Missing gender. Skipping.`);
+            return;
+          }
+          const gStr = String(genderVal).trim().toLowerCase();
+          let gender = "";
+          if (gStr === "m" || gStr === "male" || gStr.includes("boy") || gStr.includes("man") || gStr.includes("male")) {
+            gender = "Male";
+          } else if (gStr === "f" || gStr === "female" || gStr.includes("girl") || gStr.includes("women") || gStr.includes("female")) {
+            gender = "Female";
+          } else {
+            warnings.push(`Row ${rowIdx + 2} in sheet "${sheetName}": Unknown gender "${genderVal}". Skipping.`);
+            return;
           }
 
           // Parse state or club
           const club = String(get("club", "gym", "state", "clubname", "club_name", "gymclub") || "Kerala").trim();
           const coach = String(get("coach", "coach_name", "coachname") || "Self").trim();
 
+          const compKey = `${name.toLowerCase()}-${age}-${gender.toLowerCase()}-${weight}`;
+          if (seenFighters.has(compKey)) {
+            warnings.push(`Row ${rowIdx + 2} in sheet "${sheetName}": Duplicate competitor "${name}" found. Skipping.`);
+            return;
+          }
+          seenFighters.add(compKey);
+
           allNormalised.push({ name, age, gender, weight, club, coach });
         });
       });
+
+      setXlsxWarnings(warnings);
 
       if (allNormalised.length === 0) {
         alert("⚠️ No fighters parsed. Please check that your sheets have columns like 'Name' and 'Weight Category'.");
@@ -1407,6 +1488,400 @@ export default function AdminPage() {
     }
     
     e.target.value = "";
+  }
+
+  // ── ORGANIZER MANUAL REGISTRATION & PROGRESSION ──────────────────────────────────────────
+  function calculateAge(dobString: string): number {
+    if (!dobString) return 0;
+    const birthDate = new Date(dobString);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  }
+
+  interface AddressMeta {
+    regNumber?: string;
+    height?: string;
+    beltLevel?: string;
+    district?: string;
+    state?: string;
+    contactNumber?: string;
+    email?: string;
+    emergencyContact?: string;
+    medicalNotes?: string;
+    photo?: string;
+    addressText?: string;
+  }
+
+  function parseAddressMeta(addressStr: string | null | undefined): AddressMeta {
+    if (!addressStr) return {};
+    try {
+      if (addressStr.startsWith("{") && addressStr.endsWith("}")) {
+        return JSON.parse(addressStr);
+      }
+    } catch (e) {
+      // Treat as raw address text
+    }
+    return { addressText: addressStr || "" };
+  }
+
+  function formatAddressMeta(meta: AddressMeta): string {
+    return JSON.stringify(meta);
+  }
+
+  function handleOpenManualModal(reg?: any) {
+    if (reg) {
+      setEditingRegId(reg.id);
+      const meta = parseAddressMeta(reg.address);
+      setManualRegNo(meta.regNumber || reg.id.substring(0, 8).toUpperCase());
+      setManualFullName(reg.profiles?.full_name || "");
+      setManualDob(reg.date_of_birth || "");
+      setManualGender(reg.gender === "female" ? "female" : "male");
+      setManualWeight(String(reg.weight_kg || ""));
+      setManualHeight(meta.height || "");
+      setManualBeltLevel(meta.beltLevel || "");
+      setManualClub(reg.club_name || "");
+      setManualDistrict(meta.district || "");
+      setManualState(meta.state || "");
+      setManualCoach(reg.coach_name || "");
+      setManualContact(meta.contactNumber || "");
+      setManualEmail(meta.email || "");
+      setManualEmergency(meta.emergencyContact || "");
+      setManualMedical(meta.medicalNotes || "");
+      setManualPhoto(meta.photo || "");
+    } else {
+      setEditingRegId(null);
+      const randomNo = "REG-" + Math.floor(100000 + Math.random() * 900000);
+      setManualRegNo(randomNo);
+      setManualFullName("");
+      setManualDob("");
+      setManualGender("male");
+      setManualWeight("");
+      setManualHeight("");
+      setManualBeltLevel("");
+      setManualClub("");
+      setManualDistrict("");
+      setManualState("");
+      setManualCoach("");
+      setManualContact("");
+      setManualEmail("");
+      setManualEmergency("");
+      setManualMedical("");
+      setManualPhoto("");
+    }
+    setIsManualModalOpen(true);
+  }
+
+  async function handleSaveManualParticipant() {
+    if (!selectedChampId) {
+      alert("No active championship selected!");
+      return;
+    }
+
+    if (!manualFullName.trim()) {
+      alert("⚠️ Full Name is required.");
+      return;
+    }
+    if (!manualDob) {
+      alert("⚠️ Date of Birth is required.");
+      return;
+    }
+    const weightVal = parseFloat(manualWeight);
+    if (isNaN(weightVal) || weightVal <= 0) {
+      alert("⚠️ Weight must be a positive number.");
+      return;
+    }
+    const ageVal = calculateAge(manualDob);
+    if (ageVal < 2 || ageVal > 100) {
+      alert("⚠️ Fighter age must be between 2 and 100 years old based on DOB.");
+      return;
+    }
+
+    const bracketsExist = matches.some(m => m.championship_id === selectedChampId);
+    if (bracketsExist) {
+      if (!confirm("⚠️ Warning: Brackets have already been generated. Saving this participant will delete all currently generated matches and progress. Do you want to proceed and reset the brackets?")) {
+        return;
+      }
+      if (isDemoMode) {
+        let localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
+        localMatches = localMatches.filter((m: any) => m.championship_id !== selectedChampId);
+        localStorage.setItem("kickbox_matches", JSON.stringify(localMatches));
+        setMatches(localMatches);
+      } else {
+        await supabase.from("matches").delete().eq("championship_id", selectedChampId);
+      }
+    }
+
+    const duplicateRegNo = registrations.some(r => {
+      if (editingRegId && r.id === editingRegId) return false;
+      const meta = parseAddressMeta(r.address);
+      return meta.regNumber && meta.regNumber.toLowerCase() === manualRegNo.toLowerCase();
+    });
+    if (duplicateRegNo) {
+      alert(`⚠️ Duplicate Registration Number: '${manualRegNo}' is already assigned.`);
+      return;
+    }
+
+    const duplicateCompetitor = registrations.some(r => {
+      if (editingRegId && r.id === editingRegId) return false;
+      const nameMatch = (r.profiles?.full_name || "").toLowerCase().trim() === manualFullName.toLowerCase().trim();
+      const genderMatch = (r.gender || "").toLowerCase().trim() === manualGender.toLowerCase().trim();
+      const dobMatch = r.date_of_birth === manualDob;
+      return nameMatch && genderMatch && dobMatch;
+    });
+    if (duplicateCompetitor) {
+      alert(`⚠️ Duplicate Competitor: A competitor with name '${manualFullName}', gender '${manualGender}', and DOB '${manualDob}' already exists.`);
+      return;
+    }
+
+    const classification = classifyFighterLocal({
+      fighter_id: editingRegId || "new",
+      full_name: manualFullName,
+      age: ageVal,
+      gender: manualGender,
+      weight_kg: weightVal
+    });
+
+    const ageCategoryName = classification.age_category;
+    const weightCategoryName = classification.weight_category;
+
+    const addressMetaStr = formatAddressMeta({
+      regNumber: manualRegNo,
+      height: manualHeight,
+      beltLevel: manualBeltLevel,
+      district: manualDistrict,
+      state: manualState,
+      contactNumber: manualContact,
+      email: manualEmail,
+      emergencyContact: manualEmergency,
+      medicalNotes: manualMedical,
+      photo: manualPhoto
+    });
+
+    try {
+      setLoading(true);
+      if (isDemoMode) {
+        const localAgeCats = JSON.parse(localStorage.getItem("kickbox_age_categories") || "[]");
+        const localWeightCats = JSON.parse(localStorage.getItem("kickbox_weight_categories") || "[]");
+        const localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+
+        let ageCat = localAgeCats.find((a: any) => a.championship_id === selectedChampId && a.name === ageCategoryName);
+        if (!ageCat) {
+          ageCat = { id: "age-" + Math.random().toString(36).substring(2, 11), championship_id: selectedChampId, name: ageCategoryName, min_age: 9, max_age: 99 };
+          localAgeCats.push(ageCat);
+        }
+        let weightCat = localWeightCats.find((w: any) => w.championship_id === selectedChampId && w.name === weightCategoryName && w.gender.toLowerCase() === manualGender.toLowerCase());
+        if (!weightCat) {
+          weightCat = { id: "weight-" + Math.random().toString(36).substring(2, 11), championship_id: selectedChampId, gender: manualGender.toLowerCase(), name: weightCategoryName, min_weight: 0, max_weight: 0 };
+          localWeightCats.push(weightCat);
+        }
+
+        if (editingRegId) {
+          const regIdx = localRegs.findIndex((r: any) => r.id === editingRegId);
+          if (regIdx !== -1) {
+            const reg = localRegs[regIdx];
+            reg.age_category_id = ageCat.id;
+            reg.weight_category_id = weightCat.id;
+            reg.gender = manualGender.toLowerCase();
+            reg.weight_kg = weightVal;
+            reg.date_of_birth = manualDob;
+            reg.club_name = manualClub;
+            reg.coach_name = manualCoach;
+            reg.address = addressMetaStr;
+            reg.profiles.full_name = manualFullName;
+            reg.age_categories = { name: ageCategoryName };
+            reg.weight_categories = { name: weightCategoryName };
+          }
+        } else {
+          const randomFighterId = "fighter-" + Math.random().toString(36).substring(2, 11);
+          const randomRegId = "reg-" + Math.random().toString(36).substring(2, 11);
+          localRegs.push({
+            id: randomRegId,
+            championship_id: selectedChampId,
+            fighter_id: randomFighterId,
+            age_category_id: ageCat.id,
+            weight_category_id: weightCat.id,
+            status: "approved",
+            gender: manualGender.toLowerCase(),
+            weight_kg: weightVal,
+            date_of_birth: manualDob,
+            club_name: manualClub,
+            coach_name: manualCoach,
+            address: addressMetaStr,
+            profiles: { id: randomFighterId, full_name: manualFullName },
+            age_categories: { name: ageCategoryName },
+            weight_categories: { name: weightCategoryName }
+          });
+        }
+
+        localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+        localStorage.setItem("kickbox_age_categories", JSON.stringify(localAgeCats));
+        localStorage.setItem("kickbox_weight_categories", JSON.stringify(localWeightCats));
+      } else {
+        const { ageCatId, weightCatId } = await findOrCreateCategoriesSupabase(
+          ageCategoryName,
+          weightCategoryName,
+          manualGender.toLowerCase(),
+          selectedChampId
+        );
+
+        if (editingRegId) {
+          const reg = registrations.find(r => r.id === editingRegId);
+          if (reg) {
+            await supabase.from("profiles").update({ full_name: manualFullName }).eq("id", reg.fighter_id);
+            await supabase.from("registrations").update({
+              age_category_id: ageCatId,
+              weight_category_id: weightCatId,
+              gender: manualGender.toLowerCase(),
+              weight_kg: weightVal,
+              date_of_birth: manualDob,
+              club_name: manualClub,
+              coach_name: manualCoach,
+              address: addressMetaStr
+            }).eq("id", editingRegId);
+          }
+        } else {
+          const randomFighterId = crypto.randomUUID();
+          await supabase.from("profiles").insert({ id: randomFighterId, full_name: manualFullName });
+          await supabase.from("registrations").insert({
+            championship_id: selectedChampId,
+            fighter_id: randomFighterId,
+            age_category_id: ageCatId,
+            weight_category_id: weightCatId,
+            gender: manualGender.toLowerCase(),
+            weight_kg: weightVal,
+            date_of_birth: manualDob,
+            club_name: manualClub,
+            coach_name: manualCoach,
+            address: addressMetaStr,
+            status: "approved"
+          });
+        }
+      }
+
+      setIsManualModalOpen(false);
+      setRefreshKey(prev => prev + 1);
+      alert(editingRegId ? "Participant updated successfully!" : "Participant registered successfully!");
+    } catch (err: any) {
+      alert("Error saving participant: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeleteParticipant(regId: string) {
+    if (!confirm("Are you sure you want to delete this participant?")) return;
+
+    const bracketsExist = matches.some(m => m.championship_id === selectedChampId);
+    if (bracketsExist) {
+      if (!confirm("⚠️ Warning: Brackets have already been generated. Deleting this participant will reset all matches and progress. Proceed?")) {
+        return;
+      }
+      if (isDemoMode) {
+        let localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
+        localMatches = localMatches.filter((m: any) => m.championship_id !== selectedChampId);
+        localStorage.setItem("kickbox_matches", JSON.stringify(localMatches));
+        setMatches(localMatches);
+      } else {
+        await supabase.from("matches").delete().eq("championship_id", selectedChampId);
+      }
+    }
+
+    try {
+      setLoading(true);
+      if (isDemoMode) {
+        let localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+        localRegs = localRegs.filter((r: any) => r.id !== regId);
+        localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+      } else {
+        await supabase.from("registrations").delete().eq("id", regId);
+      }
+      setRefreshKey(prev => prev + 1);
+      alert("Participant deleted successfully.");
+    } catch (err: any) {
+      alert("Error deleting participant: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleBulkDeleteParticipants() {
+    if (selectedRegistryIds.size === 0) return;
+    if (!confirm(`Are you sure you want to delete the ${selectedRegistryIds.size} selected participants?`)) return;
+
+    const bracketsExist = matches.some(m => m.championship_id === selectedChampId);
+    if (bracketsExist) {
+      if (!confirm("⚠️ Warning: Brackets have already been generated. Deleting these participants will reset all matches and progress. Proceed?")) {
+        return;
+      }
+      if (isDemoMode) {
+        let localMatches = JSON.parse(localStorage.getItem("kickbox_matches") || "[]");
+        localMatches = localMatches.filter((m: any) => m.championship_id !== selectedChampId);
+        localStorage.setItem("kickbox_matches", JSON.stringify(localMatches));
+        setMatches(localMatches);
+      } else {
+        await supabase.from("matches").delete().eq("championship_id", selectedChampId);
+      }
+    }
+
+    try {
+      setLoading(true);
+      const idsToDelete = Array.from(selectedRegistryIds);
+      if (isDemoMode) {
+        let localRegs = JSON.parse(localStorage.getItem("kickbox_registrations") || "[]");
+        localRegs = localRegs.filter((r: any) => !idsToDelete.includes(r.id));
+        localStorage.setItem("kickbox_registrations", JSON.stringify(localRegs));
+      } else {
+        await supabase.from("registrations").delete().in("id", idsToDelete);
+      }
+      setSelectedRegistryIds(new Set());
+      setRefreshKey(prev => prev + 1);
+      alert("Selected participants deleted successfully.");
+    } catch (err: any) {
+      alert("Error deleting participants: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleExportCSV(selectedOnly: boolean = false) {
+    const list = selectedOnly 
+      ? registrations.filter(r => selectedRegistryIds.has(r.id))
+      : registrations.filter(r => r.championship_id === selectedChampId);
+
+    if (list.length === 0) {
+      alert("No participants to export!");
+      return;
+    }
+
+    let csv = "Reg Number,Full Name,DOB,Gender,Weight (kg),Club/Academy,Coach,District,State,Category\n";
+    list.forEach(r => {
+      const meta = parseAddressMeta(r.address);
+      const regNo = meta.regNumber || r.id.substring(0, 8).toUpperCase();
+      const club = r.club_name || "Kerala Gym";
+      const coach = r.coach_name || "Self";
+      const district = meta.district || "Default";
+      const state = meta.state || "Kerala";
+      const ageName = r.age_categories?.name || "General";
+      const weightName = r.weight_categories?.name || "General";
+      const catLabel = `${ageName} | ${weightName} | ${r.gender}`;
+
+      csv += `"${regNo}","${r.profiles?.full_name || 'Fighter'}","${r.date_of_birth}","${r.gender}",${r.weight_kg},"${club}","${coach}","${district}","${state}","${catLabel}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `competitor_list_${championships.find(c => c.id === selectedChampId)?.name || 'championship'}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
 
@@ -1982,157 +2457,493 @@ export default function AdminPage() {
               <div className="column-title-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
                 <div>
                   <h2 className="column-title">Fighter Registration Desk</h2>
-                  <p className="column-subtitle">Review, approve, or reject pending tournament registrations</p>
-                </div>
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-
+                  <p className="column-subtitle">Review, approve, reject, or manually register competitors for the tournament</p>
                 </div>
               </div>
 
-              <div className="approvals-panel" style={{ width: '100%' }}>
+              {/* Sub tabs navigation */}
+              <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0px', marginBottom: '20px' }}>
+                <button
+                  onClick={() => setRegistrationsSubTab("registry")}
+                  className={`nav-link ${registrationsSubTab === "registry" ? "active" : ""}`}
+                  style={{ background: 'transparent', border: 'none', borderBottom: registrationsSubTab === "registry" ? '3px solid var(--neo-red)' : '3px solid transparent', color: registrationsSubTab === "registry" ? 'var(--text-primary)' : 'var(--text-secondary)', padding: '10px 16px', fontSize: '13px', fontWeight: '800', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.05em' }}
+                >
+                  Competitor Registry Table
+                </button>
+                <button
+                  onClick={() => setRegistrationsSubTab("approvals")}
+                  className={`nav-link ${registrationsSubTab === "approvals" ? "active" : ""}`}
+                  style={{ background: 'transparent', border: 'none', borderBottom: registrationsSubTab === "approvals" ? '3px solid var(--neo-red)' : '3px solid transparent', color: registrationsSubTab === "approvals" ? 'var(--text-primary)' : 'var(--text-secondary)', padding: '10px 16px', fontSize: '13px', fontWeight: '800', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.05em' }}
+                >
+                  Excel Import & Approval Desk
+                </button>
+              </div>
 
-                {/* ── XLSX Upload Panel ────────────────────────────────────── */}
-                <div style={{ background: 'var(--slate)', borderRadius: '12px', padding: '20px 24px', marginBottom: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-                    <div>
-                      <h3 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)' }}>Upload Fighter Excel (XLSX)</h3>
-                      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px' }}>Columns: Name, Age, Gender, Weight (kg), Club, Coach — categories auto-assigned by WAK-1F rules</p>
-                      {!selectedChampId && (
-                        <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.15)', padding: '6px 12px', borderRadius: '6px', color: 'var(--neo-red)', fontSize: '12px', fontWeight: 'bold' }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--neo-red)' }}>warning</span>
-                          No active championship selected. Go to the "Championships" tab to create or select one first.
-                        </div>
-                      )}
+              {registrationsSubTab === "approvals" ? (
+                <div className="approvals-panel" style={{ width: '100%' }}>
+                  {/* ── XLSX Upload Panel ────────────────────────────────────── */}
+                  <div style={{ background: 'var(--slate)', borderRadius: '12px', padding: '20px 24px', marginBottom: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+                      <div>
+                        <h3 style={{ fontSize: '15px', fontWeight: '700', color: 'var(--text-primary)' }}>Upload Fighter Excel (XLSX)</h3>
+                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px' }}>Columns: Name, Age, Gender, Weight (kg), Club, Coach — categories auto-assigned by WAK-1F rules</p>
+                        {!selectedChampId && (
+                          <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.15)', padding: '6px 12px', borderRadius: '6px', color: 'var(--neo-red)', fontSize: '12px', fontWeight: 'bold' }}>
+                            <span className="material-symbols-outlined" style={{ fontSize: '16px', color: 'var(--neo-red)' }}>warning</span>
+                            No active championship selected. Go to the "Championships" tab to create or select one first.
+                          </div>
+                        )}
+                      </div>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--neo-red)', color: 'white', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.04em' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
+                        Choose .xlsx / .xls
+                        <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleXLSXFileChange} />
+                      </label>
                     </div>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'var(--neo-red)', color: 'white', padding: '9px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', letterSpacing: '0.04em' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload_file</span>
-                      Choose .xlsx / .xls
-                      <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleXLSXFileChange} />
-                    </label>
+
+                    {/* XLSX validation warnings */}
+                    {xlsxWarnings.length > 0 && (
+                      <div style={{ background: 'rgba(255,149,0,0.08)', border: '1px solid rgba(255,149,0,0.2)', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', maxHeight: '120px', overflowY: 'auto' }}>
+                        <strong style={{ color: 'var(--warning-amber)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>warning</span>
+                          Excel Import Notice ({xlsxWarnings.length} issues ignored):
+                        </strong>
+                        <ul style={{ fontSize: '11px', color: 'var(--text-secondary)', paddingLeft: '20px', marginTop: '6px' }}>
+                          {xlsxWarnings.map((w, idx) => <li key={idx} style={{ marginBottom: '3px' }}>{w}</li>)}
+                        </ul>
+                      </div>
+                    )}
+
+                    {xlsxPreview.length > 0 && (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                            📄 <strong style={{ color: 'var(--text-primary)' }}>{xlsxFileName}</strong> — {xlsxPreview.length} fighters parsed
+                          </span>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button onClick={() => { setXlsxPreview([]); setXlsxFileName(""); setXlsxWarnings([]); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                              Discard
+                            </button>
+                            <button 
+                              onClick={handleXLSXImport} 
+                              disabled={xlsxImporting} 
+                              style={{ 
+                                background: !selectedChampId ? 'rgba(255,255,255,0.08)' : 'var(--success-green)', 
+                                color: !selectedChampId ? 'var(--text-secondary)' : 'white', 
+                                border: 'none', 
+                                padding: '6px 18px', 
+                                borderRadius: '6px', 
+                                fontSize: '13px', 
+                                fontWeight: '700', 
+                                cursor: !selectedChampId ? 'not-allowed' : 'pointer', 
+                                opacity: xlsxImporting ? 0.6 : 1 
+                              }}
+                            >
+                              {xlsxImporting ? "Importing…" : `✓ Import ${xlsxPreview.length} Fighters`}
+                            </button>
+                          </div>
+                        </div>
+                        <div style={{ overflowX: 'auto', maxHeight: '240px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                            <thead>
+                              <tr style={{ background: 'var(--midnight)', position: 'sticky', top: 0 }}>
+                                {['#','Name','Age','Gender','Weight (kg)','Club','Auto Category'].map(h => (
+                                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: '700', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {xlsxPreview.slice(0, 50).map((f, i) => {
+                                const cls = classifyFighterLocal({ fighter_id: String(i), full_name: f.name, age: f.age, gender: f.gender, weight_kg: f.weight });
+                                return (
+                                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <td style={{ padding: '7px 12px', color: 'var(--text-secondary)' }}>{i + 1}</td>
+                                    <td style={{ padding: '7px 12px', fontWeight: '600', color: 'var(--text-primary)' }}>{f.name}</td>
+                                    <td style={{ padding: '7px 12px', color: 'var(--text-primary)' }}>{f.age}</td>
+                                    <td style={{ padding: '7px 12px' }}>
+                                      <span style={{ background: f.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)', color: f.gender === 'Male' ? '#60a5fa' : '#f472b6', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700' }}>{f.gender}</span>
+                                    </td>
+                                    <td style={{ padding: '7px 12px', color: 'var(--text-primary)' }}>{f.weight} kg</td>
+                                    <td style={{ padding: '7px 12px', color: 'var(--text-secondary)' }}>{f.club || '—'}</td>
+                                    <td style={{ padding: '7px 12px' }}>
+                                      <span style={{ background: 'rgba(255,149,0,0.15)', color: 'var(--warning-amber)', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                                        {cls.age_category} · {cls.weight_category} · {cls.gender}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {xlsxPreview.length > 50 && (
+                                <tr><td colSpan={7} style={{ padding: '8px 12px', color: 'var(--text-secondary)', fontSize: '12px', textAlign: 'center' }}>…and {xlsxPreview.length - 50} more rows</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {xlsxPreview.length > 0 && (
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                        <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                          📄 <strong style={{ color: 'var(--text-primary)' }}>{xlsxFileName}</strong> — {xlsxPreview.length} fighters parsed
-                        </span>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button onClick={() => { setXlsxPreview([]); setXlsxFileName(""); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
-                            Discard
-                          </button>
-                          <button 
-                            onClick={handleXLSXImport} 
-                            disabled={xlsxImporting} 
-                            style={{ 
-                              background: !selectedChampId ? 'rgba(255,255,255,0.08)' : 'var(--success-green)', 
-                              color: !selectedChampId ? 'var(--text-secondary)' : 'white', 
-                              border: 'none', 
-                              padding: '6px 18px', 
-                              borderRadius: '6px', 
-                              fontSize: '13px', 
-                              fontWeight: '700', 
-                              cursor: !selectedChampId ? 'not-allowed' : 'pointer', 
-                              opacity: xlsxImporting ? 0.6 : 1 
-                            }}
-                          >
-                            {xlsxImporting ? "Importing…" : `✓ Import ${xlsxPreview.length} Fighters`}
-                          </button>
-                        </div>
+                  <div className="approvals-list">
+                    {registrations.length === 0 ? (
+                      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        No fighter registrations found in the database.
                       </div>
-                      <div style={{ overflowX: 'auto', maxHeight: '240px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                          <thead>
-                            <tr style={{ background: 'var(--midnight)', position: 'sticky', top: 0 }}>
-                              {['#','Name','Age','Gender','Weight (kg)','Club','Auto Category'].map(h => (
-                                <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: '700', whiteSpace: 'nowrap', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {xlsxPreview.slice(0, 50).map((f, i) => {
-                              const cls = classifyFighterLocal({ fighter_id: String(i), full_name: f.name, age: f.age, gender: f.gender, weight_kg: f.weight });
-                              return (
-                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                                  <td style={{ padding: '7px 12px', color: 'var(--text-secondary)' }}>{i + 1}</td>
-                                  <td style={{ padding: '7px 12px', fontWeight: '600', color: 'var(--text-primary)' }}>{f.name}</td>
-                                  <td style={{ padding: '7px 12px', color: 'var(--text-primary)' }}>{f.age}</td>
-                                  <td style={{ padding: '7px 12px' }}>
-                                    <span style={{ background: f.gender === 'Male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)', color: f.gender === 'Male' ? '#60a5fa' : '#f472b6', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700' }}>{f.gender}</span>
-                                  </td>
-                                  <td style={{ padding: '7px 12px', color: 'var(--text-primary)' }}>{f.weight} kg</td>
-                                  <td style={{ padding: '7px 12px', color: 'var(--text-secondary)' }}>{f.club || '—'}</td>
-                                  <td style={{ padding: '7px 12px' }}>
-                                    <span style={{ background: 'rgba(255,149,0,0.15)', color: 'var(--warning-amber)', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap' }}>
-                                      {cls.age_category} · {cls.weight_category} · {cls.gender}
-                                    </span>
-                                  </td>
+                    ) : (
+                      registrations.map((reg) => (
+                        <div className="approval-item" key={reg.id} style={{ padding: '20px 24px' }}>
+                          <div className="approval-fighter-details">
+                            <div className="approval-avatar" style={{ width: '56px', height: '56px' }}>
+                              <img src={getFighterAvatar(reg.profiles?.id)} alt={getFighterName(reg.profiles)} />
+                            </div>
+                            <div>
+                              <strong style={{ display: 'block', fontSize: '16px' }}>
+                                {getFighterName(reg.profiles)}
+                              </strong>
+                              <small style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                Division: {getCategoryName(reg.age_categories)} | Weight: {reg.weight_kg}kg ({reg.gender}) | Bracket: {getCategoryName(reg.weight_categories)}
+                              </small>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                            <span className={`status-badge ${reg.status}`} style={{ fontSize: '11px', padding: '6px 14px' }}>
+                              {reg.status}
+                            </span>
+
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              {reg.status !== "approved" && (
+                                <button
+                                  onClick={() => handleUpdateRegStatus(reg.id, "approved")}
+                                  className="btn-action-small"
+                                  style={{ backgroundColor: 'var(--success-green)' }}
+                                >
+                                  Approve
+                                </button>
+                              )}
+                              {reg.status !== "rejected" && (
+                                <button
+                                  onClick={() => handleUpdateRegStatus(reg.id, "rejected")}
+                                  className="btn-action-small"
+                                  style={{ backgroundColor: 'var(--neo-red)' }}
+                                >
+                                  Reject
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Fighter Registry Table Subtab */
+                <div style={{ background: 'var(--slate)', borderRadius: '12px', padding: '24px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Search, Filter & Actions bar */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flex: 1, minWidth: '300px' }}>
+                      <input
+                        type="text"
+                        placeholder="Search Name, Reg No, Club, Coach..."
+                        value={registrySearch}
+                        onChange={(e) => { setRegistrySearch(e.target.value); setRegistryPage(1); }}
+                        className="form-input"
+                        style={{ width: '220px', padding: '8px 12px', fontSize: '13px', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)' }}
+                      />
+                      
+                      {/* Age Filter */}
+                      <select
+                        value={registryFilterAge}
+                        onChange={(e) => { setRegistryFilterAge(e.target.value); setRegistryPage(1); }}
+                        className="form-input"
+                        style={{ width: 'auto', minWidth: '130px', padding: '8px 12px', fontSize: '13px', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)' }}
+                      >
+                        <option value="all">All Ages</option>
+                        {Array.from(new Set(registrations.map(r => getCategoryName(r.age_categories)))).sort().map(age => (
+                          <option key={age} value={age}>{age}</option>
+                        ))}
+                      </select>
+
+                      {/* Gender Filter */}
+                      <select
+                        value={registryFilterGender}
+                        onChange={(e) => { setRegistryFilterGender(e.target.value); setRegistryPage(1); }}
+                        className="form-input"
+                        style={{ width: 'auto', padding: '8px 12px', fontSize: '13px', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)' }}
+                      >
+                        <option value="all">All Genders</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                      </select>
+
+                      <button
+                        onClick={() => { setRegistrySearch(""); setRegistryFilterAge("all"); setRegistryFilterGender("all"); setRegistryPage(1); }}
+                        style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+                      >
+                        Reset
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => handleOpenManualModal(null)}
+                        className="btn-primary"
+                        style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--success-green)' }}
+                        disabled={!selectedChampId}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
+                        Add Participant
+                      </button>
+                      <button
+                        onClick={() => handleExportCSV(false)}
+                        className="btn-action-small"
+                        style={{ padding: '8px 14px', fontSize: '12px', background: 'var(--midnight)', border: '1px solid rgba(255,255,255,0.12)' }}
+                      >
+                        CSV Export
+                      </button>
+                      <button
+                        onClick={() => {
+                          const champ = championships.find(c => c.id === selectedChampId);
+                          const champName = champ ? champ : { name: "Kickboxing Championship" };
+                          const champRegs = registrations.filter(r => r.championship_id === selectedChampId);
+                          printCompetitorListPDF(champName, champRegs);
+                        }}
+                        className="btn-action-small"
+                        style={{ padding: '8px 14px', fontSize: '12px', background: 'var(--midnight)', border: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>picture_as_pdf</span>
+                        PDF List
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bulk Actions Header */}
+                  {selectedRegistryIds.size > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', padding: '10px 16px', borderRadius: '8px', fontSize: '13px' }}>
+                      <span style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>
+                        Selected {selectedRegistryIds.size} competitor(s)
+                      </span>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={() => handleExportCSV(true)}
+                          style={{ background: 'var(--midnight)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-primary)', padding: '4px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}
+                        >
+                          Export Selected (CSV)
+                        </button>
+                        <button
+                          onClick={handleBulkDeleteParticipants}
+                          style={{ background: 'var(--neo-red)', color: '#FFFFFF', border: 'none', padding: '4px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+                        >
+                          Delete Selected
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Fighter Table */}
+                  {(() => {
+                    const filtered = registrations.filter(r => {
+                      if (r.championship_id !== selectedChampId) return false;
+                      
+                      const meta = parseAddressMeta(r.address);
+                      const regNo = meta.regNumber || r.id.substring(0, 8).toUpperCase();
+                      const name = (r.profiles?.full_name || "").toLowerCase();
+                      const club = (r.club_name || "").toLowerCase();
+                      const coach = (r.coach_name || "").toLowerCase();
+                      const district = (meta.district || "").toLowerCase();
+                      const state = (meta.state || "").toLowerCase();
+                      
+                      const query = registrySearch.toLowerCase();
+                      const matchQuery = !query || 
+                        name.includes(query) || 
+                        regNo.toLowerCase().includes(query) || 
+                        club.includes(query) || 
+                        coach.includes(query) || 
+                        district.includes(query) || 
+                        state.includes(query);
+
+                      const ageName = getCategoryName(r.age_categories);
+                      const matchAge = registryFilterAge === "all" || ageName === registryFilterAge;
+                      const matchGender = registryFilterGender === "all" || r.gender.toLowerCase() === registryFilterGender.toLowerCase();
+
+                      return matchQuery && matchAge && matchGender;
+                    });
+
+                    const sorted = [...filtered].sort((a, b) => {
+                      let valA = "";
+                      let valB = "";
+                      if (registrySortColumn === "name") {
+                        valA = (a.profiles?.full_name || "").toLowerCase();
+                        valB = (b.profiles?.full_name || "").toLowerCase();
+                      } else if (registrySortColumn === "club") {
+                        valA = (a.club_name || "").toLowerCase();
+                        valB = (b.club_name || "").toLowerCase();
+                      } else if (registrySortColumn === "weight") {
+                        const wA = a.weight_kg || 0;
+                        const wB = b.weight_kg || 0;
+                        return registrySortOrder === "asc" ? wA - wB : wB - wA;
+                      } else {
+                        valA = a.id;
+                        valB = b.id;
+                      }
+                      
+                      if (valA < valB) return registrySortOrder === "asc" ? -1 : 1;
+                      if (valA > valB) return registrySortOrder === "asc" ? 1 : -1;
+                      return 0;
+                    });
+
+                    const totalRows = sorted.length;
+                    const startIndex = (registryPage - 1) * registryRowsPerPage;
+                    const paginated = sorted.slice(startIndex, startIndex + registryRowsPerPage);
+                    const totalPages = Math.ceil(totalRows / registryRowsPerPage) || 1;
+
+                    return (
+                      <>
+                        <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                            <thead>
+                              <tr style={{ background: 'var(--midnight)' }}>
+                                <th style={{ padding: '12px 16px', width: '40px', textAlign: 'left' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={paginated.length > 0 && paginated.every(r => selectedRegistryIds.has(r.id))}
+                                    onChange={(e) => {
+                                      const newSel = new Set(selectedRegistryIds);
+                                      if (e.target.checked) {
+                                        paginated.forEach(r => newSel.add(r.id));
+                                      } else {
+                                        paginated.forEach(r => newSel.delete(r.id));
+                                      }
+                                      setSelectedRegistryIds(newSel);
+                                    }}
+                                  />
+                                </th>
+                                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 'bold' }}>Reg No.</th>
+                                <th 
+                                  onClick={() => {
+                                    setRegistrySortColumn("name");
+                                    setRegistrySortOrder(prev => prev === "asc" ? "desc" : "asc");
+                                  }} 
+                                  style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 'bold', cursor: 'pointer' }}
+                                >
+                                  Name {registrySortColumn === "name" && (registrySortOrder === "asc" ? "▲" : "▼")}
+                                </th>
+                                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 'bold' }}>DOB / Gender</th>
+                                <th 
+                                  onClick={() => {
+                                    setRegistrySortColumn("weight");
+                                    setRegistrySortOrder(prev => prev === "asc" ? "desc" : "asc");
+                                  }} 
+                                  style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 'bold', cursor: 'pointer' }}
+                                >
+                                  Weight {registrySortColumn === "weight" && (registrySortOrder === "asc" ? "▲" : "▼")}
+                                </th>
+                                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 'bold' }}>Category (Auto Division)</th>
+                                <th 
+                                  onClick={() => {
+                                    setRegistrySortColumn("club");
+                                    setRegistrySortOrder(prev => prev === "asc" ? "desc" : "asc");
+                                  }}
+                                  style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 'bold', cursor: 'pointer' }}
+                                >
+                                  Club / Team Name {registrySortColumn === "club" && (registrySortOrder === "asc" ? "▲" : "▼")}
+                                </th>
+                                <th style={{ padding: '12px 16px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 'bold', width: '120px' }}>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {paginated.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>No registry fighters match your filters.</td>
                                 </tr>
-                              );
-                            })}
-                            {xlsxPreview.length > 50 && (
-                              <tr><td colSpan={7} style={{ padding: '8px 12px', color: 'var(--text-secondary)', fontSize: '12px', textAlign: 'center' }}>…and {xlsxPreview.length - 50} more rows</td></tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {/* ─────────────────────────────────────────────────────────── */}
-                <div className="approvals-list">
-                  {registrations.length === 0 ? (
-                    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                      No fighter registrations found in the database.
-                    </div>
-                  ) : (
-                    registrations.map((reg) => (
-                      <div className="approval-item" key={reg.id} style={{ padding: '20px 24px' }}>
-                        <div className="approval-fighter-details">
-                          <div className="approval-avatar" style={{ width: '56px', height: '56px' }}>
-                            <img src={getFighterAvatar(reg.profiles?.id)} alt={getFighterName(reg.profiles)} />
-                          </div>
+                              ) : (
+                                paginated.map((reg, idx) => {
+                                  const meta = parseAddressMeta(reg.address);
+                                  const regNo = meta.regNumber || reg.id.substring(0, 8).toUpperCase();
+                                  const isSelected = selectedRegistryIds.has(reg.id);
+
+                                  return (
+                                    <tr key={reg.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: isSelected ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                                      <td style={{ padding: '10px 16px' }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={(e) => {
+                                            const newSel = new Set(selectedRegistryIds);
+                                            if (e.target.checked) {
+                                              newSel.add(reg.id);
+                                            } else {
+                                              newSel.delete(reg.id);
+                                            }
+                                            setSelectedRegistryIds(newSel);
+                                          }}
+                                        />
+                                      </td>
+                                      <td style={{ padding: '10px 16px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>{regNo}</td>
+                                      <td style={{ padding: '10px 16px', fontWeight: '800', color: 'var(--text-primary)' }}>{getFighterName(reg.profiles)}</td>
+                                      <td style={{ padding: '10px 16px' }}>
+                                        {reg.date_of_birth} 
+                                        <span style={{ marginLeft: '8px', background: reg.gender === 'male' ? 'rgba(59,130,246,0.15)' : 'rgba(236,72,153,0.15)', color: reg.gender === 'male' ? '#60a5fa' : '#f472b6', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>{reg.gender.toUpperCase()}</span>
+                                      </td>
+                                      <td style={{ padding: '10px 16px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{reg.weight_kg} kg</td>
+                                      <td style={{ padding: '10px 16px', fontWeight: '700', color: 'var(--neo-red)' }}>
+                                        {getCategoryName(reg.age_categories)} · {getCategoryName(reg.weight_categories)}
+                                      </td>
+                                      <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>
+                                        {reg.club_name || '—'}
+                                      </td>
+                                      <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                          <button
+                                            onClick={() => handleOpenManualModal(reg)}
+                                            style={{ background: 'var(--midnight)', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--text-primary)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}
+                                          >
+                                            Edit
+                                          </button>
+                                          <button
+                                            onClick={() => handleDeleteParticipant(reg.id)}
+                                            style={{ background: 'rgba(255,59,48,0.1)', border: '1px solid rgba(255,59,48,0.2)', color: 'var(--neo-red)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}
+                                          >
+                                            Delete
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Pagination Footer */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', fontSize: '13px', color: 'var(--text-secondary)' }}>
                           <div>
-                            <strong style={{ display: 'block', fontSize: '16px' }}>
-                              {getFighterName(reg.profiles)}
-                            </strong>
-                            <small style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                              Division: {getCategoryName(reg.age_categories)} | Weight: {reg.weight_kg}kg ({reg.gender}) | Bracket: {getCategoryName(reg.weight_categories)}
-                            </small>
+                            Showing {startIndex + 1} to {Math.min(startIndex + registryRowsPerPage, totalRows)} of {totalRows} competitors
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <button
+                              disabled={registryPage === 1}
+                              onClick={() => setRegistryPage(prev => Math.max(1, prev - 1))}
+                              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', opacity: registryPage === 1 ? 0.4 : 1 }}
+                            >
+                              Prev
+                            </button>
+                            <span>Page {registryPage} of {totalPages}</span>
+                            <button
+                              disabled={registryPage >= totalPages}
+                              onClick={() => setRegistryPage(prev => Math.min(totalPages, prev + 1))}
+                              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', opacity: registryPage >= totalPages ? 0.4 : 1 }}
+                            >
+                              Next
+                            </button>
                           </div>
                         </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                          <span className={`status-badge ${reg.status}`} style={{ fontSize: '11px', padding: '6px 14px' }}>
-                            {reg.status}
-                          </span>
-
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            {reg.status !== "approved" && (
-                              <button
-                                onClick={() => handleUpdateRegStatus(reg.id, "approved")}
-                                className="btn-action-small"
-                                style={{ backgroundColor: 'var(--success-green)' }}
-                              >
-                                Approve
-                              </button>
-                            )}
-                            {reg.status !== "rejected" && (
-                              <button
-                                onClick={() => handleUpdateRegStatus(reg.id, "rejected")}
-                                className="btn-action-small"
-                                style={{ backgroundColor: 'var(--neo-red)' }}
-                              >
-                                Reject
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
+                      </>
+                    );
+                  })()}
                 </div>
-              </div>
+              )}
             </section>
           )}
 
@@ -2287,15 +3098,141 @@ export default function AdminPage() {
                       </button>
                     </div>
                   )}
-                  <button
-                    onClick={handleDownloadPDF}
-                    className="btn-primary"
-                    style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px' }}
-                    disabled={matches.length === 0}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>picture_as_pdf</span>
-                    Download Match Schedule PDF
-                  </button>
+                  {/* Reports Center Dropdown */}
+                  <div style={{ position: 'relative', zIndex: 999 }}>
+                    <button
+                      onClick={() => setIsReportCenterOpen(prev => !prev)}
+                      className="btn-primary"
+                      style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 18px', background: 'linear-gradient(135deg, var(--neo-red) 0%, #B91C1C 100%)', boxShadow: '0 4px 12px rgba(220,38,38,0.25)', border: 'none' }}
+                      disabled={matches.length === 0}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>print</span>
+                      Reports Center
+                      <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{isReportCenterOpen ? 'expand_less' : 'expand_more'}</span>
+                    </button>
+                    
+                    {isReportCenterOpen && (
+                      <>
+                        {/* Transparent clickaway overlay */}
+                        <div onClick={() => setIsReportCenterOpen(false)} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 998, background: 'transparent' }} />
+                        
+                        {/* Dropdown Menu */}
+                        <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, background: 'var(--midnight)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', width: '280px', boxShadow: '0 8px 30px rgba(0,0,0,0.6)', zIndex: 999, padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ padding: '6px 12px', fontSize: '10px', fontWeight: 'bold', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid rgba(255,255,255,0.04)', marginBottom: '4px' }}>Print Tournament Reports</div>
+                          
+                          {[
+                            { 
+                              name: "Match Schedule", 
+                              icon: "calendar_today", 
+                              desc: "Chronological fight schedule", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                printMatchSchedulePDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, matches); 
+                              } 
+                            },
+                            { 
+                              name: "Category Brackets", 
+                              icon: "account_tree", 
+                              desc: "Landscape tournament bracket tree", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const chRegs = registrations.filter(r => r.championship_id === selectedChampId);
+                                const catKey = selectedMatchCategory !== "all" ? selectedMatchCategory : (matches[0]?.ring_number?.split(" | CATEGORY:")[1] || "General");
+                                const catMatches = matches.filter(m => (m.ring_number?.split(" | CATEGORY:")[1] || "").toLowerCase() === catKey.toLowerCase());
+                                printCategoryBracketPDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, catKey, catMatches, chRegs); 
+                              } 
+                            },
+                            { 
+                              name: "Round-wise Sheets", 
+                              icon: "assignment", 
+                              desc: "Judges scorecards by round", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const roundName = matches[0]?.round_name || "Round 1";
+                                printRoundWisePDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, roundName, matches); 
+                              } 
+                            },
+                            { 
+                              name: "Ring-wise Fight List", 
+                              icon: "view_agenda", 
+                              desc: "Ring-wise chronological fights", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const ringNumber = matches[0]?.ring_number?.split(" | ")[0] || "Ring 1";
+                                printRingWisePDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, ringNumber, matches); 
+                              } 
+                            },
+                            { 
+                              name: "Category-wise List", 
+                              icon: "category", 
+                              desc: "Division-wise schedules", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const catKey = selectedMatchCategory !== "all" ? selectedMatchCategory : (matches[0]?.ring_number?.split(" | CATEGORY:")[1] || "General");
+                                const catMatches = matches.filter(m => (m.ring_number?.split(" | CATEGORY:")[1] || "").toLowerCase() === catKey.toLowerCase());
+                                printCategoryWisePDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, catKey, catMatches); 
+                              } 
+                            },
+                            { 
+                              name: "Competitor Registry", 
+                              icon: "badge", 
+                              desc: "Fighter verification sheet", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const chRegs = registrations.filter(r => r.championship_id === selectedChampId); 
+                                printCompetitorListPDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, chRegs); 
+                              } 
+                            },
+                            { 
+                              name: "Weigh-in Log Sheets", 
+                              icon: "scale", 
+                              desc: "Fighter weight log sheet", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const chRegs = registrations.filter(r => r.championship_id === selectedChampId); 
+                                printWeighInSheetPDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, chRegs); 
+                              } 
+                            },
+                            { 
+                              name: "Medal Result Sheet", 
+                              icon: "military_tech", 
+                              desc: "Winners placement podium sheet", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const catKey = selectedMatchCategory !== "all" ? selectedMatchCategory : (matches[0]?.ring_number?.split(" | CATEGORY:")[1] || "General");
+                                const catMatches = matches.filter(m => (m.ring_number?.split(" | CATEGORY:")[1] || "").toLowerCase() === catKey.toLowerCase());
+                                printResultSheetPDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, catKey, catMatches); 
+                              } 
+                            },
+                            { 
+                              name: "Club Standings Summary", 
+                              icon: "insights", 
+                              desc: "Club participation & medal tallies", 
+                              fn: () => { 
+                                const ch = championships.find(c=>c.id===selectedChampId); 
+                                const chRegs = registrations.filter(r => r.championship_id === selectedChampId); 
+                                printTournamentSummaryPDF(ch || {name: "Kickboxing Championship", venue: "State Stadium"}, matches, chRegs); 
+                              } 
+                            },
+                          ].map((item, index) => (
+                            <button
+                              key={index}
+                              onClick={() => { item.fn(); setIsReportCenterOpen(false); }}
+                              style={{ width: '100%', background: 'transparent', border: 'none', borderRadius: '8px', padding: '8px 12px', textAlign: 'left', display: 'flex', gap: '10px', alignItems: 'center', cursor: 'pointer', transition: 'background 0.2s' }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            >
+                              <span className="material-symbols-outlined" style={{ fontSize: '18px', color: 'var(--neo-red)' }}>{item.icon}</span>
+                              <div>
+                                <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{item.name}</div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{item.desc}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -2799,6 +3736,244 @@ export default function AdminPage() {
           )}
         </main>
       </div>
+
+      {/* ── MANUAL REGISTRATION MODAL ────────────────────────────────────────── */}
+      {isManualModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div style={{ background: 'var(--slate)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', width: '100%', maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+            
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px', letterSpacing: '0.05em' }}>
+                <span className="material-symbols-outlined" style={{ color: 'var(--neo-red)', fontSize: '20px' }}>person_add</span>
+                {editingRegId ? "Edit Participant Info" : "Manual Fighter Registration"}
+              </h3>
+              <button onClick={() => setIsManualModalOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              
+              {/* Row 1: Reg Number & Full Name */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Reg Number</label>
+                  <input
+                    type="text"
+                    value={manualRegNo}
+                    onChange={(e) => setManualRegNo(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Full Name *</label>
+                  <input
+                    type="text"
+                    value={manualFullName}
+                    onChange={(e) => setManualFullName(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="Enter fighter's full name"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: DOB, Gender, Weight, Height */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>DOB *</label>
+                  <input
+                    type="date"
+                    value={manualDob}
+                    onChange={(e) => setManualDob(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Gender *</label>
+                  <select
+                    value={manualGender}
+                    onChange={(e) => setManualGender(e.target.value as any)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Weight (kg) *</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={manualWeight}
+                    onChange={(e) => setManualWeight(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="e.g. 54.5"
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Height (cm)</label>
+                  <input
+                    type="number"
+                    value={manualHeight}
+                    onChange={(e) => setManualHeight(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="e.g. 172"
+                  />
+                </div>
+              </div>
+
+              {/* Row 3: Belt Level, Club/Academy, Coach */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Belt Level</label>
+                  <input
+                    type="text"
+                    value={manualBeltLevel}
+                    onChange={(e) => setManualBeltLevel(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="e.g. Yellow"
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Club / Academy</label>
+                  <input
+                    type="text"
+                    value={manualClub}
+                    onChange={(e) => setManualClub(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="e.g. Warriors Fight Club"
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Coach Name</label>
+                  <input
+                    type="text"
+                    value={manualCoach}
+                    onChange={(e) => setManualCoach(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="Coach name"
+                  />
+                </div>
+              </div>
+
+              {/* Row 4: District, State, Contact, Email */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>District</label>
+                  <input
+                    type="text"
+                    value={manualDistrict}
+                    onChange={(e) => setManualDistrict(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="e.g. Ernakulam"
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>State</label>
+                  <input
+                    type="text"
+                    value={manualState}
+                    onChange={(e) => setManualState(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="e.g. Kerala"
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Contact Number</label>
+                  <input
+                    type="tel"
+                    value={manualContact}
+                    onChange={(e) => setManualContact(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="Mobile number"
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Email</label>
+                  <input
+                    type="email"
+                    value={manualEmail}
+                    onChange={(e) => setManualEmail(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="Fighter email (optional)"
+                  />
+                </div>
+              </div>
+
+              {/* Row 5: Emergency Contact, Photo URL, Medical Notes */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Emergency Contact</label>
+                  <input
+                    type="text"
+                    value={manualEmergency}
+                    onChange={(e) => setManualEmergency(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="Name - Number"
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Photo URL (optional)</label>
+                  <input
+                    type="text"
+                    value={manualPhoto}
+                    onChange={(e) => setManualPhoto(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', height: '38px', fontSize: '13px' }}
+                    placeholder="Link to avatar image"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '700', marginBottom: '6px', letterSpacing: '0.05em' }}>Medical Notes / Contraindications</label>
+                <textarea
+                  value={manualMedical}
+                  onChange={(e) => setManualMedical(e.target.value)}
+                  className="form-input"
+                  style={{ width: '100%', height: '60px', background: 'var(--midnight)', borderColor: 'rgba(255,255,255,0.1)', resize: 'vertical', padding: '10px 12px', fontSize: '13px' }}
+                  placeholder="Enter any medical considerations or allergies..."
+                />
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '20px 24px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button
+                onClick={() => setIsManualModalOpen(false)}
+                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--text-secondary)', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveManualParticipant}
+                className="btn-primary"
+                style={{ background: 'var(--success-green)', border: 'none', color: '#FFFFFF', padding: '10px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '800' }}
+              >
+                {editingRegId ? "Save Changes" : "Register Fighter"}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Mobile Bottom Navigation Bar */}
       <nav className="mobile-bottom-nav" aria-label="Mobile Bottom Tabs">
